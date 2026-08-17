@@ -28,6 +28,7 @@ jobs:
       - run: npm install @notionhq/client
 
       - name: Sync to Notion
+        if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_ISSUES_DB_ID: ${{ secrets.NOTION_ISSUES_DB_ID }}

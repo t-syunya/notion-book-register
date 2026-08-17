@@ -13,6 +13,16 @@ if (!key) {
   process.exit(1)
 }
 
+if (!process.env.NOTION_TOKEN) {
+  console.error("NOTION_TOKEN が設定されていません")
+  process.exit(1)
+}
+
+if (!process.env.NOTION_ISSUES_DB_ID) {
+  console.error("NOTION_ISSUES_DB_ID が設定されていません")
+  process.exit(1)
+}
+
 const notion = new Client({ auth: process.env.NOTION_TOKEN })
 
 const { results } = await notion.databases.query({
