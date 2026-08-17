@@ -1,0 +1,38 @@
+name: Notion Issue Link
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Lint issue key
+        run: |
+          TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          if ! printf '%s %s' "$TITLE" "$GITHUB_HEAD_REF" | grep -qE '(^|[^[:alnum:]_])NBR-[0-9]+($|[^[:alnum:]_])'; then
+            echo "::error::PR タイトルまたはブランチ名に NBR Issue キー（例: NBR-12）を含めてください"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install --ignore-scripts @notionhq/client@4.0.2
+
+      - name: Sync to Notion
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_ISSUES_DB_ID: ${{ secrets.NOTION_ISSUES_DB_ID }}
+        run: node .github/scripts/notion-sync.mjs
