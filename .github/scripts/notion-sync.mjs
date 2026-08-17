@@ -5,7 +5,7 @@ const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
 const pr = event.pull_request
 
 const key = `${pr.title} ${pr.head.ref}`
-  .match(/[A-Za-z]{2,5}-[0-9]+/)?.[0]
+  .match(/NBR-[0-9]+/i)?.[0]
   ?.toUpperCase()
 
 if (!key) {

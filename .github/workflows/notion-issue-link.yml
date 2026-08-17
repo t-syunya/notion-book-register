@@ -16,8 +16,8 @@ jobs:
       - name: Lint issue key
         run: |
           TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
-          if ! printf '%s %s' "$TITLE" "$GITHUB_HEAD_REF" | grep -qE '[A-Za-z]{2,5}-[0-9]+'; then
-            echo "::error::PR タイトルまたはブランチ名に Issue キー（例: NBR-12）を含めてください"
+          if ! printf '%s %s' "$TITLE" "$GITHUB_HEAD_REF" | grep -qE 'NBR-[0-9]+'; then
+            echo "::error::PR タイトルまたはブランチ名に NBR Issue キー（例: NBR-12）を含めてください"
             exit 1
           fi
 
