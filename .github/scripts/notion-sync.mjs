@@ -23,7 +23,10 @@ if (!process.env.NOTION_ISSUES_DB_ID) {
   process.exit(1)
 }
 
-const notion = new Client({ auth: process.env.NOTION_TOKEN })
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+  notionVersion: "2022-06-28",
+})
 
 const { results } = await notion.databases.query({
   database_id: process.env.NOTION_ISSUES_DB_ID,

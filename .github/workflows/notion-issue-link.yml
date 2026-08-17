@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Lint issue key
@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm install @notionhq/client
+      - run: npm install --ignore-scripts @notionhq/client@4.0.2
 
       - name: Sync to Notion
         if: github.event.pull_request.head.repo.full_name == github.repository
