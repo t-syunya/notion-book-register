@@ -13,6 +13,7 @@ PYTHONPATH=src python -m unittest discover -s tests
 Notion の Issue と GitHub PR は `NBR-<ID>` 形式の Issue キーで連携します。
 
 - ブランチ名または PR タイトルに Issue キーを含める
+- Notion Issue の `Name` にも Issue キーを含める
 - PR タイトルは `[NBR-8] ISBN検証を追加` のように先頭へキーを付ける
 - コミットメッセージにも同じ Issue キーを含める
 - PR 本文の「対応 Issue」に Notion Issue URL を貼る

@@ -4,9 +4,11 @@ import { Client } from "@notionhq/client"
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
 const pr = event.pull_request
 
-const key = `${pr.title} ${pr.head.ref}`
-  .match(/(^|[^A-Z0-9_])(NBR-[0-9]+)(?=$|[^A-Z0-9_])/i)?.[2]
-  ?.toUpperCase()
+const issueKeyMatch = `${pr.title} ${pr.head.ref}`.match(
+  /(^|[^A-Z0-9_])(NBR-([0-9]+))(?=$|[^A-Z0-9_])/i,
+)
+const key = issueKeyMatch?.[2]?.toUpperCase()
+const issueId = issueKeyMatch?.[3]
 
 if (!key) {
   console.error("Issue キーが見つかりません")
@@ -28,15 +30,76 @@ const notion = new Client({
   notionVersion: "2022-06-28",
 })
 
-const { results } = await notion.databases.query({
-  database_id: process.env.NOTION_ISSUES_DB_ID,
-  filter: { property: "Issue Key", formula: { string: { equals: key } } },
-  page_size: 1,
-})
+async function findIssuePage() {
+  const queries = [
+    {
+      label: "Issue Key",
+      filter: { property: "Issue Key", formula: { string: { equals: key } } },
+      pageSize: 1,
+    },
+    {
+      label: "ID",
+      filter: { property: "ID", unique_id: { equals: Number(issueId) } },
+      pageSize: 1,
+    },
+    {
+      label: "Name",
+      filter: { property: "Name", title: { contains: key } },
+      pageSize: 10,
+    },
+  ]
 
-const page = results[0]
+  for (const query of queries) {
+    const results = await queryIssues(query)
+    const page =
+      query.label === "Name" ? results.find((result) => hasIssueKey(result, key)) : results[0]
+
+    if (page) {
+      if (query.label !== "Issue Key") {
+        console.warn(`${key} は ${query.label} で取得しました`)
+      }
+      return page
+    }
+  }
+
+  return undefined
+}
+
+async function queryIssues(query) {
+  try {
+    const { results } = await notion.databases.query({
+      database_id: process.env.NOTION_ISSUES_DB_ID,
+      filter: query.filter,
+      page_size: query.pageSize,
+    })
+
+    return results
+  } catch (error) {
+    if (isValidationError(error)) {
+      console.warn(`${query.label} で検索できませんでした: ${error.message}`)
+      return []
+    }
+    throw error
+  }
+}
+
+function hasIssueKey(page, issueKey) {
+  const title = page.properties?.Name?.title
+    ?.map((text) => text.plain_text)
+    .join("")
+
+  return new RegExp(`(^|[^A-Z0-9_])${issueKey}($|[^A-Z0-9_])`, "i").test(title ?? "")
+}
+
+function isValidationError(error) {
+  return error?.code === "validation_error" || error?.status === 400
+}
+
+const page = await findIssuePage()
 if (!page) {
-  console.error(`Notion に ${key} の Issue がありません`)
+  console.error(
+    `Notion に ${key} の Issue がありません。NOTION_ISSUES_DB_ID が Issues database を指しているか、Name に ${key} が含まれているか確認してください`,
+  )
   process.exit(1)
 }
 
