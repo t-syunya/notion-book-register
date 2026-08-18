@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from http.client import HTTPException
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -14,7 +15,8 @@ from notion_book_register.isbn import normalize_isbn13
 NDL_SRU_API_URL = "https://ndlsearch.ndl.go.jp/api/sru"
 
 _SRU_NAMESPACE = "http://www.loc.gov/zing/srw/"
-_NAMESPACES = {"sru": _SRU_NAMESPACE}
+_SRU_DIAGNOSTIC_NAMESPACE = "http://www.loc.gov/zing/srw/diagnostic/"
+_NAMESPACES = {"sru": _SRU_NAMESPACE, "diag": _SRU_DIAGNOSTIC_NAMESPACE}
 
 
 class NdlApiError(RuntimeError):
@@ -81,6 +83,8 @@ class NdlClient:
             raise NdlApiError("Timed out while reading from NDL API.") from error
         except OSError as error:
             raise NdlApiError(f"Failed to read from NDL API: {error}") from error
+        except HTTPException as error:
+            raise NdlApiError(f"Failed to read from NDL API: {error}") from error
 
         return parse_sru_response(payload)
 
@@ -129,7 +133,10 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
 
 
 def _raise_for_diagnostics(root: ElementTree.Element) -> None:
-    diagnostics = root.findall(".//sru:diagnostic", namespaces=_NAMESPACES)
+    diagnostics = [
+        *root.findall(".//sru:diagnostic", namespaces=_NAMESPACES),
+        *root.findall(".//diag:diagnostic", namespaces=_NAMESPACES),
+    ]
     if not diagnostics:
         return
 
@@ -138,8 +145,8 @@ def _raise_for_diagnostics(root: ElementTree.Element) -> None:
         details = [
             text.strip()
             for text in (
-                diagnostic.findtext("sru:message", namespaces=_NAMESPACES),
-                diagnostic.findtext("sru:details", namespaces=_NAMESPACES),
+                _find_child_text(diagnostic, "message"),
+                _find_child_text(diagnostic, "details"),
             )
             if text and text.strip()
         ]
@@ -148,3 +155,10 @@ def _raise_for_diagnostics(root: ElementTree.Element) -> None:
 
     message = "; ".join(messages) if messages else "unknown diagnostic"
     raise NdlApiError(f"NDL API returned SRU diagnostics: {message}")
+
+
+def _find_child_text(element: ElementTree.Element, local_name: str) -> str | None:
+    for child in element:
+        if child.tag.rsplit("}", maxsplit=1)[-1] == local_name:
+            return child.text
+    return None

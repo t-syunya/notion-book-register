@@ -1,4 +1,5 @@
 import unittest
+from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
@@ -119,6 +120,12 @@ class NdlClientTest(unittest.TestCase):
         with self.assertRaisesRegex(NdlApiError, "closed"):
             client.search_by_isbn("9784297135782")
 
+    def test_search_by_isbn_wraps_incomplete_read(self) -> None:
+        client = NdlClient(opener=lambda request, timeout: ErrorResponse(IncompleteRead(b"")))
+
+        with self.assertRaisesRegex(NdlApiError, "IncompleteRead"):
+            client.search_by_isbn("9784297135782")
+
     def test_parse_sru_response_handles_empty_records(self) -> None:
         response = parse_sru_response(
             b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
@@ -146,6 +153,22 @@ class NdlClientTest(unittest.TestCase):
   <numberOfRecords>0</numberOfRecords>
   <diagnostics>
     <diagnostic>
+      <uri>info:srw/diagnostic/1/66</uri>
+      <message>Unsupported schema</message>
+      <details>dcndl</details>
+    </diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>"""
+            )
+
+    def test_parse_sru_response_rejects_diagnostic_namespace(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "Unsupported schema"):
+            parse_sru_response(
+                b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <version>1.2</version>
+  <numberOfRecords>0</numberOfRecords>
+  <diagnostics>
+    <diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
       <uri>info:srw/diagnostic/1/66</uri>
       <message>Unsupported schema</message>
       <details>dcndl</details>
