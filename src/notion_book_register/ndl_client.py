@@ -107,7 +107,7 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
 
     try:
         root = ElementTree.fromstring(payload)
-    except ElementTree.ParseError as error:
+    except (ElementTree.ParseError, LookupError) as error:
         raise NdlApiError("NDL API returned invalid XML.") from error
 
     _raise_for_diagnostics(root)

@@ -162,6 +162,13 @@ class NdlClientTest(unittest.TestCase):
         with self.assertRaisesRegex(NdlApiError, "invalid XML"):
             parse_sru_response(b"<searchRetrieveResponse>")
 
+    def test_parse_sru_response_rejects_unknown_xml_encoding(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            parse_sru_response(
+                b"""<?xml version="1.0" encoding="madeup"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/" />"""
+            )
+
     def test_parse_sru_response_requires_number_of_records(self) -> None:
         with self.assertRaisesRegex(NdlApiError, "missing numberOfRecords"):
             parse_sru_response(b"<searchRetrieveResponse />")
