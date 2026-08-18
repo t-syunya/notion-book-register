@@ -6,6 +6,8 @@ from notion_book_register.ndl_client import (
     NdlApiError,
     NdlClient,
     NdlSruResponse,
+    book_from_ndl_record,
+    book_from_sru_response,
     parse_sru_response,
 )
 from notion_book_register.notion_mapping import book_to_notion_properties
@@ -16,6 +18,8 @@ __all__ = [
     "NdlApiError",
     "NdlClient",
     "NdlSruResponse",
+    "book_from_ndl_record",
+    "book_from_sru_response",
     "book_to_notion_properties",
     "normalize_isbn13",
     "parse_sru_response",

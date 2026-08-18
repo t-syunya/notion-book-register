@@ -3,7 +3,13 @@ from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
-from notion_book_register import NdlApiError, NdlClient, parse_sru_response
+from notion_book_register import (
+    NdlApiError,
+    NdlClient,
+    book_from_ndl_record,
+    book_from_sru_response,
+    parse_sru_response,
+)
 
 SRU_RESPONSE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
@@ -212,6 +218,196 @@ class NdlClientTest(unittest.TestCase):
   </diagnostics>
 </searchRetrieveResponse>"""
             )
+
+    def test_book_from_ndl_record_maps_dcndl_bibliographic_fields(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:dcterms="http://purl.org/dc/terms/"
+  xmlns:foaf="http://xmlns.com/foaf/0.1/"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  rdf:about="https://ndlsearch.ndl.go.jp/books/R100000002-I000000000000">
+  <dcterms:title>Python Testing</dcterms:title>
+  <dcterms:creator>
+    <foaf:Agent>
+      <foaf:name>Author A</foaf:name>
+      <dcndl:transcription>オーサー A</dcndl:transcription>
+      <dcndl:role>著者</dcndl:role>
+    </foaf:Agent>
+  </dcterms:creator>
+  <dcterms:creator>
+    <rdf:Description>
+      <rdf:value>Author B</rdf:value>
+    </rdf:Description>
+  </dcterms:creator>
+  <dcterms:publisher>
+    <foaf:Agent>
+      <foaf:name>Publisher</foaf:name>
+      <dcndl:transcription>パブリッシャー</dcndl:transcription>
+      <dcndl:location>Tokyo</dcndl:location>
+    </foaf:Agent>
+  </dcterms:publisher>
+  <dcterms:issued>2026</dcterms:issued>
+  <dc:identifier xsi:type="dcndl:ISBN"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">978-4-297-13578-2</dc:identifier>
+</dcndl:BibResource>"""
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+        self.assertEqual(book.title, "Python Testing")
+        self.assertEqual(book.authors, ("Author A", "Author B"))
+        self.assertEqual(book.publisher, "Publisher")
+        self.assertEqual(book.published_date, "2026")
+        self.assertEqual(
+            book.ndl_url,
+            "https://ndlsearch.ndl.go.jp/books/R100000002-I000000000000",
+        )
+
+    def test_book_from_ndl_record_uses_title_transcription_and_fallback_isbn(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+  <dcndl:titleTranscription>Python Testing</dcndl:titleTranscription>
+</dcndl:BibResource>""",
+            isbn13="978-4-297-13578-2",
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+        self.assertEqual(book.title, "Python Testing")
+
+    def test_book_from_ndl_record_prefers_primary_fields_over_fallbacks(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:dcterms="http://purl.org/dc/terms/">
+  <dcndl:titleTranscription>パイソン テスティング</dcndl:titleTranscription>
+  <dcterms:title>Python Testing</dcterms:title>
+  <dcterms:date>2026-08-18</dcterms:date>
+  <dcterms:issued>2026</dcterms:issued>
+  <dc:identifier>9784297135782</dc:identifier>
+</dcndl:BibResource>"""
+        )
+
+        self.assertEqual(book.title, "Python Testing")
+        self.assertEqual(book.published_date, "2026")
+
+    def test_book_from_ndl_record_extracts_isbn_from_seealso_resource(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dcterms="http://purl.org/dc/terms/"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+  <dcterms:title>Python Testing</dcterms:title>
+  <rdfs:seeAlso rdf:resource="http://iss.ndl.go.jp/isbn/9784297135782" />
+</dcndl:BibResource>"""
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+
+    def test_book_from_ndl_record_does_not_use_setisbn_resource(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dcterms="http://purl.org/dc/terms/"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+  <dcterms:title>Python Testing</dcterms:title>
+  <rdfs:seeAlso rdf:resource="http://iss.ndl.go.jp/setisbn/9784000000000" />
+</dcndl:BibResource>""",
+            isbn13="978-4-297-13578-2",
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+
+    def test_book_from_ndl_record_does_not_use_setisbn_identifier(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:dcterms="http://purl.org/dc/terms/"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dcterms:title>Python Testing</dcterms:title>
+  <dc:identifier xsi:type="dcndl:SetISBN">9784000000000</dc:identifier>
+  <dc:identifier rdf:datatype="http://ndl.go.jp/dcndl/terms/ErrorISBN">
+    9784000000000
+  </dc:identifier>
+</dcndl:BibResource>""",
+            isbn13="978-4-297-13578-2",
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+
+    def test_book_from_ndl_record_uses_identifier_typed_as_isbn(self) -> None:
+        book = book_from_ndl_record(
+            """<dcndl:BibResource
+  xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:dcterms="http://purl.org/dc/terms/"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <dcterms:title>Python Testing</dcterms:title>
+  <dc:identifier rdf:datatype="http://ndl.go.jp/dcndl/terms/SetISBN">
+    9784000000000
+  </dc:identifier>
+  <dc:identifier rdf:datatype="http://ndl.go.jp/dcndl/terms/ISBN">
+    9784297135782
+  </dc:identifier>
+</dcndl:BibResource>"""
+        )
+
+        self.assertEqual(book.isbn13, "9784297135782")
+
+    def test_book_from_sru_response_returns_none_when_not_found(self) -> None:
+        response = parse_sru_response(
+            b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+</searchRetrieveResponse>"""
+        )
+
+        self.assertIsNone(book_from_sru_response(response, isbn13="9784297135782"))
+
+    def test_book_from_sru_response_maps_first_record(self) -> None:
+        response = parse_sru_response(
+            b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records>
+    <record>
+      <recordData>
+        <dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+          <dcndl:titleTranscription>Python Testing</dcndl:titleTranscription>
+        </dcndl:BibResource>
+      </recordData>
+    </record>
+  </records>
+</searchRetrieveResponse>"""
+        )
+
+        book = book_from_sru_response(response, isbn13="9784297135782")
+
+        self.assertIsNotNone(book)
+        self.assertEqual(book.title, "Python Testing")
+
+    def test_book_from_ndl_record_requires_title(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "missing title"):
+            book_from_ndl_record(
+                """<dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+  <dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/">9784297135782</dc:identifier>
+</dcndl:BibResource>"""
+            )
+
+    def test_book_from_ndl_record_requires_isbn(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "missing ISBN-13"):
+            book_from_ndl_record(
+                """<dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+  <dcndl:titleTranscription>Python Testing</dcndl:titleTranscription>
+</dcndl:BibResource>"""
+            )
+
+    def test_book_from_ndl_record_rejects_invalid_xml(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            book_from_ndl_record("<dcndl:BibResource>")
 
 
 if __name__ == "__main__":
