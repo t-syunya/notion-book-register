@@ -76,6 +76,7 @@ class NdlClient:
             with self._opener(request, timeout=self._timeout) as response:
                 payload = response.read()
         except HTTPError as error:
+            error.close()
             raise NdlApiError(f"NDL API returned HTTP {error.code}.") from error
         except URLError as error:
             raise NdlApiError(f"Failed to connect to NDL API: {error.reason}") from error

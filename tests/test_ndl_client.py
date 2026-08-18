@@ -49,6 +49,14 @@ class ErrorResponse:
         raise self._error
 
 
+class CloseTrackingBody:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class NdlClientTest(unittest.TestCase):
     def test_search_by_isbn_builds_sru_request_and_parses_response(self) -> None:
         requests = []
@@ -98,6 +106,19 @@ class NdlClientTest(unittest.TestCase):
 
         with self.assertRaisesRegex(NdlApiError, "HTTP 500"):
             client.search_by_isbn("9784297135782")
+
+    def test_search_by_isbn_closes_http_error_response(self) -> None:
+        response_body = CloseTrackingBody()
+
+        def opener(request, timeout):
+            raise HTTPError(request.full_url, 500, "Server Error", {}, response_body)
+
+        client = NdlClient(opener=opener)
+
+        with self.assertRaisesRegex(NdlApiError, "HTTP 500"):
+            client.search_by_isbn("9784297135782")
+
+        self.assertTrue(response_body.closed)
 
     def test_search_by_isbn_wraps_url_error(self) -> None:
         def opener(request, timeout):
