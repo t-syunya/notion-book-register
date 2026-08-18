@@ -17,6 +17,8 @@ def normalize_isbn13(value: str) -> str:
     digits = _extract_digits(value)
     if len(digits) != 13:
         raise InvalidIsbnError("ISBN-13 must contain exactly 13 digits.")
+    if not _has_isbn13_prefix(digits):
+        raise InvalidIsbnError("ISBN-13 must start with 978 or 979.")
     if not validate_isbn13(digits):
         raise InvalidIsbnError("ISBN-13 check digit is invalid.")
     return digits
@@ -25,8 +27,14 @@ def normalize_isbn13(value: str) -> str:
 def validate_isbn13(value: str) -> bool:
     """Return True when value is a valid ISBN-13."""
 
-    digits = _extract_digits(value)
+    try:
+        digits = _extract_digits(value)
+    except (InvalidIsbnError, TypeError):
+        return False
+
     if len(digits) != 13:
+        return False
+    if not _has_isbn13_prefix(digits):
         return False
 
     total = 0
@@ -41,4 +49,17 @@ def validate_isbn13(value: str) -> bool:
 def _extract_digits(value: str) -> str:
     if not isinstance(value, str):
         raise TypeError("ISBN value must be a string.")
-    return "".join(char for char in value if char.isdigit())
+
+    digits = []
+    for char in value:
+        if "0" <= char <= "9":
+            digits.append(char)
+        elif char in {" ", "-"}:
+            continue
+        else:
+            raise InvalidIsbnError("ISBN-13 may contain only ASCII digits, spaces, and hyphens.")
+    return "".join(digits)
+
+
+def _has_isbn13_prefix(value: str) -> bool:
+    return value.startswith(("978", "979"))
