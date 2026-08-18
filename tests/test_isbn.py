@@ -27,8 +27,8 @@ class IsbnTest(unittest.TestCase):
     def test_normalize_isbn13_rejects_non_separator_characters(self) -> None:
         for value in (
             "x9784297135782",
-            "９７８４２９７１３５７８２",
-            "978429713578²",
+            "\uff19\uff17\uff18\uff14\uff12\uff19\uff17\uff11\uff13\uff15\uff17\uff18\uff12",
+            "978429713578\u00b2",
         ):
             with self.subTest(value=value):
                 with self.assertRaises(InvalidIsbnError):
@@ -41,7 +41,11 @@ class IsbnTest(unittest.TestCase):
         self.assertFalse(validate_isbn13("4006381333931"))
 
     def test_validate_isbn13_returns_false_for_non_ascii_digits(self) -> None:
-        self.assertFalse(validate_isbn13("９７８４２９７１３５７８２"))
+        self.assertFalse(
+            validate_isbn13(
+                "\uff19\uff17\uff18\uff14\uff12\uff19\uff17\uff11\uff13\uff15\uff17\uff18\uff12"
+            )
+        )
 
     def test_validate_isbn13_returns_false_for_invalid_characters(self) -> None:
         for value in (
