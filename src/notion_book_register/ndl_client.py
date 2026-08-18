@@ -120,6 +120,8 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
         number_of_records = int(number_of_records_text)
     except ValueError as error:
         raise NdlApiError("NDL API response has invalid numberOfRecords.") from error
+    if number_of_records < 0:
+        raise NdlApiError("NDL API response has invalid numberOfRecords.")
 
     records_xml = []
     for record_data in root.findall(".//sru:recordData", namespaces=_NAMESPACES):

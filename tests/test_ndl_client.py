@@ -166,6 +166,14 @@ class NdlClientTest(unittest.TestCase):
         with self.assertRaisesRegex(NdlApiError, "missing numberOfRecords"):
             parse_sru_response(b"<searchRetrieveResponse />")
 
+    def test_parse_sru_response_rejects_negative_number_of_records(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid numberOfRecords"):
+            parse_sru_response(
+                b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>-1</numberOfRecords>
+</searchRetrieveResponse>"""
+            )
+
     def test_parse_sru_response_rejects_diagnostics(self) -> None:
         with self.assertRaisesRegex(NdlApiError, "Unsupported schema"):
             parse_sru_response(
