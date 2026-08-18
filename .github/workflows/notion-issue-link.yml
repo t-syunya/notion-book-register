@@ -10,6 +10,7 @@ permissions:
 jobs:
   link:
     runs-on: ubuntu-latest
+    environment: github-notion-projects
     steps:
       - uses: actions/checkout@v4
         with:
