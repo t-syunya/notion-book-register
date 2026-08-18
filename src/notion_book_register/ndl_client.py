@@ -53,11 +53,9 @@ class NdlClient:
     def __init__(
         self,
         *,
-        base_url: str = NDL_SRU_API_URL,
         timeout: float = 10.0,
         opener: _Opener = urlopen,
     ) -> None:
-        self._base_url = base_url
         self._timeout = timeout
         self._opener = opener
 
@@ -101,7 +99,7 @@ class NdlClient:
                 "query": f'isbn="{isbn13}"',
             }
         )
-        return f"{self._base_url}?{query}"
+        return f"{NDL_SRU_API_URL}?{query}"
 
 
 def parse_sru_response(payload: bytes) -> NdlSruResponse:
