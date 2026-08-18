@@ -46,13 +46,12 @@ async function findIssuePage() {
       label: "Name",
       filter: { property: "Name", title: { contains: key } },
       pageSize: 10,
+      matcher: (result) => hasIssueKey(result, key),
     },
   ]
 
   for (const query of queries) {
-    const results = await queryIssues(query)
-    const page =
-      query.label === "Name" ? results.find((result) => hasIssueKey(result, key)) : results[0]
+    const page = await queryIssue(query)
 
     if (page) {
       if (query.label !== "Issue Key") {
@@ -65,22 +64,34 @@ async function findIssuePage() {
   return undefined
 }
 
-async function queryIssues(query) {
-  try {
-    const { results } = await notion.databases.query({
-      database_id: process.env.NOTION_ISSUES_DB_ID,
-      filter: query.filter,
-      page_size: query.pageSize,
-    })
+async function queryIssue(query) {
+  let startCursor
 
-    return results
+  try {
+    do {
+      const response = await notion.databases.query({
+        database_id: process.env.NOTION_ISSUES_DB_ID,
+        filter: query.filter,
+        page_size: query.pageSize,
+        start_cursor: startCursor,
+      })
+
+      const page = query.matcher ? response.results.find(query.matcher) : response.results[0]
+      if (page) {
+        return page
+      }
+
+      startCursor = response.has_more ? response.next_cursor : undefined
+    } while (startCursor)
   } catch (error) {
     if (isValidationError(error)) {
       console.warn(`${query.label} で検索できませんでした: ${error.message}`)
-      return []
+      return undefined
     }
     throw error
   }
+
+  return undefined
 }
 
 function hasIssueKey(page, issueKey) {
