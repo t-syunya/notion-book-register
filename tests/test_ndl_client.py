@@ -175,6 +175,28 @@ class NdlClientTest(unittest.TestCase):
 <searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/" />"""
             )
 
+    def test_parse_sru_response_rejects_dtd(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            parse_sru_response(
+                b"""<!DOCTYPE searchRetrieveResponse [
+  <!ELEMENT searchRetrieveResponse ANY>
+]>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+</searchRetrieveResponse>"""
+            )
+
+    def test_parse_sru_response_rejects_entity_expansion(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            parse_sru_response(
+                b"""<!DOCTYPE searchRetrieveResponse [
+  <!ENTITY expanded "expanded">
+]>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>&expanded;</numberOfRecords>
+</searchRetrieveResponse>"""
+            )
+
     def test_parse_sru_response_requires_number_of_records(self) -> None:
         with self.assertRaisesRegex(NdlApiError, "missing numberOfRecords"):
             parse_sru_response(b"<searchRetrieveResponse />")
@@ -408,6 +430,30 @@ class NdlClientTest(unittest.TestCase):
     def test_book_from_ndl_record_rejects_invalid_xml(self) -> None:
         with self.assertRaisesRegex(NdlApiError, "invalid XML"):
             book_from_ndl_record("<dcndl:BibResource>")
+
+    def test_book_from_ndl_record_rejects_dtd(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            book_from_ndl_record(
+                """<!DOCTYPE BibResource [
+  <!ELEMENT BibResource ANY>
+]>
+<dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+  <dcndl:titleTranscription>Python Testing</dcndl:titleTranscription>
+</dcndl:BibResource>""",
+                isbn13="9784297135782",
+            )
+
+    def test_book_from_ndl_record_rejects_entity_expansion(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "invalid XML"):
+            book_from_ndl_record(
+                """<!DOCTYPE BibResource [
+  <!ENTITY title "Python Testing">
+]>
+<dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/">
+  <dcndl:titleTranscription>&title;</dcndl:titleTranscription>
+</dcndl:BibResource>""",
+                isbn13="9784297135782",
+            )
 
 
 if __name__ == "__main__":

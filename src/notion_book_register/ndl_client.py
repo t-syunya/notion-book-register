@@ -11,6 +11,9 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from defusedxml import ElementTree as DefusedElementTree
+from defusedxml.common import DefusedXmlException
+
 from notion_book_register.isbn import normalize_isbn13
 from notion_book_register.models import Book
 
@@ -108,10 +111,7 @@ class NdlClient:
 def parse_sru_response(payload: bytes) -> NdlSruResponse:
     """Parse the SRU response fields needed by the next normalization step."""
 
-    try:
-        root = ElementTree.fromstring(payload)
-    except (ElementTree.ParseError, LookupError) as error:
-        raise NdlApiError("NDL API returned invalid XML.") from error
+    root = _parse_xml(payload, "NDL API returned invalid XML.")
 
     _raise_for_diagnostics(root)
 
@@ -147,10 +147,7 @@ def book_from_sru_response(response: NdlSruResponse, *, isbn13: str | None = Non
 def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
     """Normalize a DC-NDL bibliographic XML record to the internal Book model."""
 
-    try:
-        root = ElementTree.fromstring(record_xml)
-    except (ElementTree.ParseError, LookupError) as error:
-        raise NdlApiError("NDL bibliographic record is invalid XML.") from error
+    root = _parse_xml(record_xml, "NDL bibliographic record is invalid XML.")
 
     title = _first_text(root, ("title", "titleTranscription"))
     if title is None:
@@ -170,6 +167,13 @@ def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
         published_date=_first_text(root, ("issued", "date")),
         ndl_url=_find_resource_url(root),
     )
+
+
+def _parse_xml(payload: bytes | str, error_message: str) -> ElementTree.Element:
+    try:
+        return DefusedElementTree.fromstring(payload, forbid_dtd=True)
+    except (ElementTree.ParseError, DefusedXmlException, LookupError) as error:
+        raise NdlApiError(error_message) from error
 
 
 def _raise_for_diagnostics(root: ElementTree.Element) -> None:
