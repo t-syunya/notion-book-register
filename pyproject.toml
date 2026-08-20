@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Register books to Notion from captured book images."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["defusedxml>=0.7.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

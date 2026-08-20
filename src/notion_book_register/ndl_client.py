@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from http.client import HTTPException
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from defusedxml import ElementTree as DefusedElementTree
+from defusedxml.common import DefusedXmlException
+
 from notion_book_register.isbn import normalize_isbn13
+from notion_book_register.models import Book
 
 NDL_SRU_API_URL = "https://ndlsearch.ndl.go.jp/api/sru"
 
 _SRU_NAMESPACE = "http://www.loc.gov/zing/srw/"
 _SRU_DIAGNOSTIC_NAMESPACE = "http://www.loc.gov/zing/srw/diagnostic/"
 _NAMESPACES = {"sru": _SRU_NAMESPACE, "diag": _SRU_DIAGNOSTIC_NAMESPACE}
+_ISBN13_PATTERN = re.compile(r"97[89](?:[\s-]?\d){10}")
 
 
 class NdlApiError(RuntimeError):
@@ -105,10 +111,7 @@ class NdlClient:
 def parse_sru_response(payload: bytes) -> NdlSruResponse:
     """Parse the SRU response fields needed by the next normalization step."""
 
-    try:
-        root = ElementTree.fromstring(payload)
-    except (ElementTree.ParseError, LookupError) as error:
-        raise NdlApiError("NDL API returned invalid XML.") from error
+    root = _parse_xml(payload, "NDL API returned invalid XML.")
 
     _raise_for_diagnostics(root)
 
@@ -131,6 +134,46 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
         records_xml.append(ElementTree.tostring(children[0], encoding="unicode"))
 
     return NdlSruResponse(number_of_records=number_of_records, records_xml=tuple(records_xml))
+
+
+def book_from_sru_response(response: NdlSruResponse, *, isbn13: str | None = None) -> Book | None:
+    """Return the first NDL record normalized to a Book, or None when no record exists."""
+
+    if not response.found:
+        return None
+    return book_from_ndl_record(response.records_xml[0], isbn13=isbn13)
+
+
+def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
+    """Normalize a DC-NDL bibliographic XML record to the internal Book model."""
+
+    root = _parse_xml(record_xml, "NDL bibliographic record is invalid XML.")
+
+    title = _first_text(root, ("title", "titleTranscription"))
+    if title is None:
+        raise NdlApiError("NDL bibliographic record is missing title.")
+
+    record_isbn = _extract_record_isbn(root)
+    fallback_isbn = normalize_isbn13(isbn13) if isbn13 is not None else None
+    normalized_isbn = record_isbn or fallback_isbn
+    if normalized_isbn is None:
+        raise NdlApiError("NDL bibliographic record is missing ISBN-13.")
+
+    return Book(
+        isbn13=normalized_isbn,
+        title=title,
+        authors=tuple(_agent_texts(root, ("creator",))),
+        publisher=_first_agent_text(root, ("publisher",)),
+        published_date=_first_text(root, ("issued", "date")),
+        ndl_url=_find_resource_url(root),
+    )
+
+
+def _parse_xml(payload: bytes | str, error_message: str) -> ElementTree.Element:
+    try:
+        return DefusedElementTree.fromstring(payload, forbid_dtd=True)
+    except (ElementTree.ParseError, DefusedXmlException, LookupError) as error:
+        raise NdlApiError(error_message) from error
 
 
 def _raise_for_diagnostics(root: ElementTree.Element) -> None:
@@ -163,3 +206,156 @@ def _find_child_text(element: ElementTree.Element, local_name: str) -> str | Non
         if child.tag.rsplit("}", maxsplit=1)[-1] == local_name:
             return child.text
     return None
+
+
+def _extract_record_isbn(root: ElementTree.Element) -> str | None:
+    resource_isbn = _extract_resource_isbn(root)
+    if resource_isbn is not None:
+        return resource_isbn
+
+    for element in root.iter():
+        if _local_name(element.tag) != "identifier":
+            continue
+
+        text = _compact_text(element)
+        if not text:
+            continue
+
+        identifier_type = _identifier_type(element)
+        if identifier_type is not None and identifier_type != "ISBN":
+            continue
+
+        candidates = [text]
+        isbn_match = _ISBN13_PATTERN.search(text)
+        if isbn_match:
+            candidates.insert(0, isbn_match.group(0))
+
+        text_lower = text.casefold()
+        looks_like_isbn = (
+            identifier_type == "ISBN"
+            or text.startswith(("978", "979"))
+            or (
+                "isbn" in text_lower
+                and "setisbn" not in text_lower
+                and "errorisbn" not in text_lower
+            )
+        )
+        if not looks_like_isbn:
+            continue
+
+        for candidate in candidates:
+            normalized_isbn = _normalize_isbn_candidate(candidate)
+            if normalized_isbn is not None:
+                return normalized_isbn
+    return None
+
+
+def _identifier_type(element: ElementTree.Element) -> str | None:
+    for name, value in element.attrib.items():
+        if _local_name(name) not in {"datatype", "type"}:
+            continue
+        return re.split(r"[/#:]", value.strip())[-1]
+    return None
+
+
+def _extract_resource_isbn(root: ElementTree.Element) -> str | None:
+    for element in root.iter():
+        if _local_name(element.tag) != "seeAlso":
+            continue
+        for name, value in element.attrib.items():
+            if _local_name(name) != "resource":
+                continue
+            normalized_isbn = _normalize_isbn_resource(value)
+            if normalized_isbn is not None:
+                return normalized_isbn
+    return None
+
+
+def _normalize_isbn_resource(value: str) -> str | None:
+    path_segments = [segment for segment in urlparse(value).path.split("/") if segment]
+    for index, segment in enumerate(path_segments[:-1]):
+        if segment != "isbn":
+            continue
+        return _normalize_isbn_candidate(path_segments[index + 1])
+    return None
+
+
+def _normalize_isbn_candidate(value: str) -> str | None:
+    for candidate in (match.group(0) for match in _ISBN13_PATTERN.finditer(value)):
+        try:
+            return normalize_isbn13(candidate)
+        except ValueError:
+            continue
+
+    try:
+        return normalize_isbn13(value)
+    except ValueError:
+        return None
+
+
+def _first_text(root: ElementTree.Element, local_names: tuple[str, ...]) -> str | None:
+    for local_name in local_names:
+        for text in _texts(root, (local_name,)):
+            return text
+    return None
+
+
+def _first_agent_text(root: ElementTree.Element, local_names: tuple[str, ...]) -> str | None:
+    for text in _agent_texts(root, local_names):
+        return text
+    return None
+
+
+def _texts(root: ElementTree.Element, local_names: tuple[str, ...]) -> list[str]:
+    values = []
+    seen = set()
+    for element in root.iter():
+        if _local_name(element.tag) not in local_names:
+            continue
+        text = _compact_text(element)
+        if not text or text in seen:
+            continue
+        values.append(text)
+        seen.add(text)
+    return values
+
+
+def _agent_texts(root: ElementTree.Element, local_names: tuple[str, ...]) -> list[str]:
+    values = []
+    seen = set()
+    for element in root.iter():
+        if _local_name(element.tag) not in local_names:
+            continue
+        text = _agent_text(element)
+        if not text or text in seen:
+            continue
+        values.append(text)
+        seen.add(text)
+    return values
+
+
+def _agent_text(element: ElementTree.Element) -> str:
+    for preferred_name in ("name", "value"):
+        for child in element.iter():
+            if child is element or _local_name(child.tag) != preferred_name:
+                continue
+            text = _compact_text(child)
+            if text:
+                return text
+    return _compact_text(element)
+
+
+def _compact_text(element: ElementTree.Element) -> str:
+    return " ".join(text.strip() for text in element.itertext() if text.strip())
+
+
+def _find_resource_url(root: ElementTree.Element) -> str | None:
+    for element in root.iter():
+        for name, value in element.attrib.items():
+            if _local_name(name) == "about" and value.strip():
+                return value.strip()
+    return None
+
+
+def _local_name(name: str) -> str:
+    return name.rsplit("}", maxsplit=1)[-1]
