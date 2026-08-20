@@ -46,6 +46,18 @@ class CloseTrackingBody:
         self.closed = True
 
 
+class ReadErrorBody:
+    def __init__(self, error: OSError) -> None:
+        self._error = error
+        self.closed = False
+
+    def read(self) -> bytes:
+        raise self._error
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class NotionClientTest(unittest.TestCase):
     def test_create_book_page_builds_notion_request_and_parses_response(self) -> None:
         requests = []
@@ -201,6 +213,28 @@ class NotionClientTest(unittest.TestCase):
 
         self.assertTrue(response_body.closed)
 
+    def test_create_book_page_wraps_http_error_with_non_object_body(self) -> None:
+        def opener(request, timeout):
+            raise HTTPError(request.full_url, 400, "Bad Request", {}, CloseTrackingBody(b"[]"))
+
+        client = NotionClient("secret_token", opener=opener)
+
+        with self.assertRaisesRegex(NotionApiError, r"HTTP 400\."):
+            client.create_book_page(Book(isbn13="9784297135782", title="Python Testing"))
+
+    def test_create_book_page_wraps_http_error_when_body_read_fails(self) -> None:
+        response_body = ReadErrorBody(IncompleteRead(b""))
+
+        def opener(request, timeout):
+            raise HTTPError(request.full_url, 500, "Server Error", {}, response_body)
+
+        client = NotionClient("secret_token", opener=opener)
+
+        with self.assertRaisesRegex(NotionApiError, r"HTTP 500\."):
+            client.create_book_page(Book(isbn13="9784297135782", title="Python Testing"))
+
+        self.assertTrue(response_body.closed)
+
     def test_create_book_page_wraps_url_error(self) -> None:
         def opener(request, timeout):
             raise URLError("timeout")
@@ -232,6 +266,12 @@ class NotionClientTest(unittest.TestCase):
         client = NotionClient("secret_token", opener=lambda request, timeout: FakeResponse(b"{"))
 
         with self.assertRaisesRegex(NotionApiError, "invalid JSON"):
+            client.create_book_page(Book(isbn13="9784297135782", title="Python Testing"))
+
+    def test_create_book_page_rejects_non_object_json_response(self) -> None:
+        client = NotionClient("secret_token", opener=lambda request, timeout: FakeResponse(b"[]"))
+
+        with self.assertRaisesRegex(NotionApiError, "JSON object"):
             client.create_book_page(Book(isbn13="9784297135782", title="Python Testing"))
 
     def test_create_book_page_requires_response_page_id(self) -> None:

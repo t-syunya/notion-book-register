@@ -125,7 +125,7 @@ class NotionClient:
                 payload = response.read()
         except HTTPError as error:
             try:
-                error_payload = error.read()
+                error_payload = _read_http_error_payload(error)
             finally:
                 error.close()
             raise NotionApiError(_notion_http_error_message(error.code, error_payload)) from error
@@ -179,6 +179,8 @@ def _parse_created_page(payload: bytes) -> CreatedNotionPage:
         data = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise NotionApiError("Notion API returned invalid JSON.") from error
+    if not isinstance(data, dict):
+        raise NotionApiError("Notion API response must be a JSON object.")
 
     page_id = data.get("id")
     if not isinstance(page_id, str) or not page_id:
@@ -189,6 +191,13 @@ def _parse_created_page(payload: bytes) -> CreatedNotionPage:
         raise NotionApiError("Notion API response has invalid page url.")
 
     return CreatedNotionPage(page_id=page_id, url=url)
+
+
+def _read_http_error_payload(error: HTTPError) -> bytes:
+    try:
+        return error.read()
+    except (HTTPException, OSError):
+        return b""
 
 
 def _notion_http_error_message(status_code: int, payload: bytes) -> str:
@@ -202,6 +211,8 @@ def _notion_error_detail(payload: bytes) -> str | None:
     try:
         data = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
         return None
 
     message = data.get("message")

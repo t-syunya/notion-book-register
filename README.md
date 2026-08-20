@@ -31,7 +31,7 @@ page = client.create_book_page(
 print(page.url)
 ```
 
-書き込み先データソースは `collection://2bddc1bd-5d17-8199-8910-000b299eb538` です。
+書き込み先データソースIDは `2bddc1bd-5d17-8199-8910-000b299eb538` です。
 対象の Notion 側スキーマに合わせて、`作品名` は title、`状態` と `ジャンル` は select、
 `memo` は rich text として送信します。
 
