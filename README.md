@@ -8,6 +8,33 @@ iPhone で撮影した書籍画像から ISBN を抽出し、国立国会図書�
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
+## Notion 書き込み
+
+`NOTION_API_KEY` または `NOTION_TOKEN` に Notion Integration のトークンを設定すると、
+`NotionClient` から「Notion 本棚」ページ内の本棚データソースへ書籍ページを作成できます。
+
+```python
+from notion_book_register import Book, NotionClient
+
+client = NotionClient.from_env()
+page = client.create_book_page(
+    Book(
+        isbn13="9784297135782",
+        title="Python Testing",
+        authors=("Author A",),
+        publisher="Publisher",
+        published_date="2026",
+        ndl_url="https://ndl.example/books/1",
+    ),
+    genre="技術書",
+)
+print(page.url)
+```
+
+書き込み先データソースIDは `2bddc1bd-5d17-8199-8910-000b299eb538` です。
+対象の Notion 側スキーマに合わせて、`作品名` は title、`状態` と `ジャンル` は select、
+`memo` は rich text として送信します。
+
 ## 実装順
 
 Notion の `Project Issues` の親子関係、優先度、外部依存の少なさから、次の順で進めます。
