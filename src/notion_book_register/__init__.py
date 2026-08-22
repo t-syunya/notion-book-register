@@ -10,14 +10,18 @@ from notion_book_register.ndl_client import (
     book_from_sru_response,
     parse_sru_response,
 )
+from notion_book_register.notion_client import CreatedNotionPage, NotionApiError, NotionClient
 from notion_book_register.notion_mapping import book_to_notion_properties
 
 __all__ = [
     "Book",
+    "CreatedNotionPage",
     "InvalidIsbnError",
     "NdlApiError",
     "NdlClient",
     "NdlSruResponse",
+    "NotionApiError",
+    "NotionClient",
     "book_from_ndl_record",
     "book_from_sru_response",
     "book_to_notion_properties",
