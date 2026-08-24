@@ -8,6 +8,21 @@ iPhone で撮影した書籍画像から ISBN を抽出し、国立国会図書�
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
+## VLM ISBN 抽出
+
+`OPENAI_API_KEY` に OpenAI API キーを設定すると、`OpenAiVlmClient` から画像中の
+ISBN-13 を抽出できます。モデルは `OPENAI_VLM_MODEL` で上書きでき、既定値は
+`gpt-5-mini` です。
+
+```python
+from notion_book_register import OpenAiVlmClient
+
+client = OpenAiVlmClient.from_env()
+with open("book-cover.jpg", "rb") as image_file:
+    result = client.extract_isbn13(image_file.read(), mime_type="image/jpeg")
+print(result.isbn13)
+```
+
 ## Notion 書き込み
 
 `NOTION_API_KEY` または `NOTION_TOKEN` に Notion Integration のトークンを設定すると、
