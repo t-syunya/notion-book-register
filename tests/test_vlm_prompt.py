@@ -72,17 +72,55 @@ class VlmPromptTest(unittest.TestCase):
         self.assertEqual(result.candidates, ())
 
     def test_parse_isbn_extraction_response_rejects_invalid_primary_isbn(self) -> None:
-        with self.assertRaisesRegex(VlmPromptError, "invalid isbn13"):
-            parse_isbn_extraction_response(
-                json.dumps(
-                    {
-                        "isbn13": "9784297135780",
-                        "candidates": [],
-                        "confidence": "high",
-                        "evidence": "text",
-                    }
-                )
+        for isbn13 in (
+            "9784297135780",
+            "97842971357820",
+            "1239784297135782",
+            "9784297135782-0",
+            "9784297135782 0",
+            "0 9784297135782",
+        ):
+            with self.subTest(isbn13=isbn13):
+                with self.assertRaisesRegex(VlmPromptError, "invalid isbn13"):
+                    parse_isbn_extraction_response(
+                        json.dumps(
+                            {
+                                "isbn13": isbn13,
+                                "candidates": [],
+                                "confidence": "high",
+                                "evidence": "text",
+                            }
+                        )
+                    )
+
+    def test_parse_isbn_extraction_response_ignores_embedded_isbn_candidates(self) -> None:
+        result = parse_isbn_extraction_response(
+            json.dumps(
+                {
+                    "isbn13": None,
+                    "candidates": [
+                        "97842971357820",
+                        "1239784297135782",
+                        "9784297135782-0",
+                        "9784297135782 0",
+                        "0 9784297135782",
+                        "ISBN 9784297135782",
+                    ],
+                    "confidence": "medium",
+                    "evidence": "OCR candidates",
+                }
             )
+        )
+
+        self.assertEqual(
+            result,
+            IsbnExtractionResult(
+                isbn13=None,
+                candidates=("9784297135782",),
+                confidence="medium",
+                evidence="OCR candidates",
+            ),
+        )
 
     def test_parse_isbn_extraction_response_rejects_non_json_object(self) -> None:
         for payload in ("not json", "[]"):

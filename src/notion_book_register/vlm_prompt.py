@@ -9,7 +9,7 @@ from typing import Any
 
 from notion_book_register.isbn import InvalidIsbnError, normalize_isbn13
 
-_ISBN13_PATTERN = re.compile(r"97[89](?:[\s-]?\d){10}")
+_ISBN13_PATTERN = re.compile(r"(?<!\d)97[89](?:[\s-]?\d){10}(?!\d)")
 
 
 class VlmPromptError(ValueError):
@@ -162,9 +162,11 @@ def _normalize_candidates(value: object) -> tuple[str, ...]:
 
 def _normalize_isbn_candidate(value: str) -> str | None:
     normalized_whitespace = re.sub(r"\s+", " ", value)
-    for candidate in (match.group(0) for match in _ISBN13_PATTERN.finditer(normalized_whitespace)):
+    for match in _ISBN13_PATTERN.finditer(normalized_whitespace):
+        if _has_adjacent_digit(normalized_whitespace, match.start(), match.end()):
+            continue
         try:
-            return normalize_isbn13(candidate)
+            return normalize_isbn13(match.group(0))
         except InvalidIsbnError:
             continue
 
@@ -172,6 +174,19 @@ def _normalize_isbn_candidate(value: str) -> str | None:
         return normalize_isbn13(normalized_whitespace)
     except InvalidIsbnError:
         return None
+
+
+def _has_adjacent_digit(value: str, start: int, end: int) -> bool:
+    left = start - 1
+    while left >= 0 and value[left] in {" ", "-"}:
+        left -= 1
+    if left >= 0 and value[left].isdigit():
+        return True
+
+    right = end
+    while right < len(value) and value[right] in {" ", "-"}:
+        right += 1
+    return right < len(value) and value[right].isdigit()
 
 
 def _require_confidence(value: object) -> str:
