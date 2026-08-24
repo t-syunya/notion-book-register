@@ -161,14 +161,15 @@ def _normalize_candidates(value: object) -> tuple[str, ...]:
 
 
 def _normalize_isbn_candidate(value: str) -> str | None:
-    for candidate in (match.group(0) for match in _ISBN13_PATTERN.finditer(value)):
+    normalized_whitespace = re.sub(r"\s+", " ", value)
+    for candidate in (match.group(0) for match in _ISBN13_PATTERN.finditer(normalized_whitespace)):
         try:
             return normalize_isbn13(candidate)
         except InvalidIsbnError:
             continue
 
     try:
-        return normalize_isbn13(value)
+        return normalize_isbn13(normalized_whitespace)
     except InvalidIsbnError:
         return None
 

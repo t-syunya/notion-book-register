@@ -36,7 +36,7 @@ class VlmPromptTest(unittest.TestCase):
                 {
                     "isbn13": "ISBN 978-4-297-13578-2",
                     "candidates": [
-                        "ISBN 978 4 297 13578 2",
+                        "ISBN 978\t4\n297 13578 2",
                         "978-4-297-13578-2 税込 2,860円",
                         "4006381333931",
                     ],
@@ -89,6 +89,42 @@ class VlmPromptTest(unittest.TestCase):
             with self.subTest(payload=payload):
                 with self.assertRaises(VlmPromptError):
                     parse_isbn_extraction_response(payload)
+
+    def test_parse_isbn_extraction_response_rejects_invalid_field_types(self) -> None:
+        invalid_cases = (
+            (
+                {
+                    "isbn13": None,
+                    "candidates": "9784297135782",
+                    "confidence": "low",
+                    "evidence": "",
+                },
+                "candidates must be an array",
+            ),
+            (
+                {
+                    "isbn13": None,
+                    "candidates": [9784297135782],
+                    "confidence": "low",
+                    "evidence": "",
+                },
+                "candidates must contain only strings",
+            ),
+            (
+                {
+                    "isbn13": None,
+                    "candidates": [],
+                    "confidence": "certain",
+                    "evidence": "",
+                },
+                "confidence must be high, medium, or low",
+            ),
+        )
+
+        for payload, message in invalid_cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(VlmPromptError, message):
+                    parse_isbn_extraction_response(json.dumps(payload))
 
     def test_parse_isbn_extraction_response_rejects_missing_or_extra_keys(self) -> None:
         with self.assertRaisesRegex(VlmPromptError, "missing required field"):
