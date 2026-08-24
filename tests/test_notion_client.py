@@ -252,6 +252,26 @@ class NotionClientTest(unittest.TestCase):
 
         self.assertIsNone(client.find_book_page_by_isbn("9784297135782"))
 
+    def test_find_book_page_by_isbn_ignores_non_page_result(self) -> None:
+        client = NotionClient(
+            "secret_token",
+            data_source_id=TEST_DATA_SOURCE_ID,
+            opener=lambda request, timeout: FakeResponse(
+                b"""{
+  "object": "list",
+  "results": [
+    {
+      "object": "data_source",
+      "id": "nested-data-source-id",
+      "url": "https://www.notion.so/nested"
+    }
+  ]
+}"""
+            ),
+        )
+
+        self.assertIsNone(client.find_book_page_by_isbn("9784297135782"))
+
     def test_create_book_page_skips_create_when_isbn_already_exists(self) -> None:
         requests = []
 

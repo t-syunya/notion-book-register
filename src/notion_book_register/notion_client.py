@@ -246,6 +246,8 @@ def _parse_first_page_from_query(payload: bytes) -> CreatedNotionPage | None:
     page = results[0]
     if not isinstance(page, dict):
         raise NotionApiError("Notion API query result must be a JSON object.")
+    if page.get("object") != "page":
+        return None
     return _parse_page_summary_from_data(page, created=False)
 
 
