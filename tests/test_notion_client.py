@@ -240,7 +240,6 @@ class NotionClientTest(unittest.TestCase):
                     },
                 },
                 "page_size": 1,
-                "result_type": "page",
             },
         )
 

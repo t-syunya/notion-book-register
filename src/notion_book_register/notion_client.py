@@ -30,7 +30,7 @@ class NotionApiError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CreatedNotionPage:
-    """Small page summary returned after a successful Notion create call."""
+    """Small page summary returned after creating or finding a Notion page."""
 
     page_id: str
     url: str | None = None
@@ -101,7 +101,7 @@ class NotionClient:
         status: str = DEFAULT_READING_STATUS,
         prevent_duplicates: bool = True,
     ) -> CreatedNotionPage:
-        """Create a new book page under the configured Notion data source."""
+        """Create a book page, or return an existing page when duplicate checks are enabled."""
 
         if prevent_duplicates:
             existing_page = self.find_book_page_by_isbn(book.isbn13)
@@ -148,7 +148,6 @@ class NotionClient:
                         },
                     },
                     "page_size": 1,
-                    "result_type": "page",
                 },
                 ensure_ascii=False,
             ).encode("utf-8"),
