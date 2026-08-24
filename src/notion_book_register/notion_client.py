@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from notion_book_register.isbn import normalize_isbn13
 from notion_book_register.models import Book
 from notion_book_register.notion_mapping import (
     DEFAULT_READING_STATUS,
@@ -33,6 +34,7 @@ class CreatedNotionPage:
 
     page_id: str
     url: str | None = None
+    created: bool = True
 
 
 class _Response(Protocol):
@@ -97,8 +99,14 @@ class NotionClient:
         *,
         genre: str | None = None,
         status: str = DEFAULT_READING_STATUS,
+        prevent_duplicates: bool = True,
     ) -> CreatedNotionPage:
         """Create a new book page under the configured Notion data source."""
+
+        if prevent_duplicates:
+            existing_page = self.find_book_page_by_isbn(book.isbn13)
+            if existing_page is not None:
+                return existing_page
 
         request = Request(
             f"{NOTION_API_URL}/pages",
@@ -121,9 +129,45 @@ class NotionClient:
             method="POST",
         )
 
+        payload = self._send_request(request)
+
+        return _parse_created_page(payload)
+
+    def find_book_page_by_isbn(self, isbn13: str) -> CreatedNotionPage | None:
+        """Return an existing Notion page registered with the ISBN-13, if any."""
+
+        normalized_isbn = normalize_isbn13(isbn13)
+        request = Request(
+            f"{NOTION_API_URL}/data_sources/{self._data_source_id}/query",
+            data=json.dumps(
+                {
+                    "filter": {
+                        "property": "memo",
+                        "rich_text": {
+                            "contains": f"ISBN: {normalized_isbn}",
+                        },
+                    },
+                    "page_size": 1,
+                    "result_type": "page",
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "Notion-Version": NOTION_VERSION,
+                "User-Agent": "notion-book-register/0.1",
+            },
+            method="POST",
+        )
+
+        payload = self._send_request(request)
+        return _parse_first_page_from_query(payload)
+
+    def _send_request(self, request: Request) -> bytes:
         try:
             with self._opener(request, timeout=self._timeout) as response:
-                payload = response.read()
+                return response.read()
         except HTTPError as error:
             try:
                 error_payload = _read_http_error_payload(error)
@@ -138,8 +182,6 @@ class NotionClient:
             raise NotionApiError(f"Failed to read from Notion API: {error}") from error
         except HTTPException as error:
             raise NotionApiError(f"Failed to read from Notion API: {error}") from error
-
-        return _parse_created_page(payload)
 
 
 def _book_page_properties(
@@ -185,6 +227,10 @@ def _split_text(value: str) -> list[str]:
 
 
 def _parse_created_page(payload: bytes) -> CreatedNotionPage:
+    return _parse_page_summary(payload, created=True)
+
+
+def _parse_first_page_from_query(payload: bytes) -> CreatedNotionPage | None:
     try:
         data = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -192,6 +238,30 @@ def _parse_created_page(payload: bytes) -> CreatedNotionPage:
     if not isinstance(data, dict):
         raise NotionApiError("Notion API response must be a JSON object.")
 
+    results = data.get("results")
+    if not isinstance(results, list):
+        raise NotionApiError("Notion API query response is missing results.")
+    if not results:
+        return None
+
+    page = results[0]
+    if not isinstance(page, dict):
+        raise NotionApiError("Notion API query result must be a JSON object.")
+    return _parse_page_summary_from_data(page, created=False)
+
+
+def _parse_page_summary(payload: bytes, *, created: bool) -> CreatedNotionPage:
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise NotionApiError("Notion API returned invalid JSON.") from error
+    if not isinstance(data, dict):
+        raise NotionApiError("Notion API response must be a JSON object.")
+
+    return _parse_page_summary_from_data(data, created=created)
+
+
+def _parse_page_summary_from_data(data: dict[str, Any], *, created: bool) -> CreatedNotionPage:
     page_id = data.get("id")
     if not isinstance(page_id, str) or not page_id:
         raise NotionApiError("Notion API response is missing page id.")
@@ -200,7 +270,7 @@ def _parse_created_page(payload: bytes) -> CreatedNotionPage:
     if url is not None and not isinstance(url, str):
         raise NotionApiError("Notion API response has invalid page url.")
 
-    return CreatedNotionPage(page_id=page_id, url=url)
+    return CreatedNotionPage(page_id=page_id, url=url, created=created)
 
 
 def _read_http_error_payload(error: HTTPError) -> bytes:

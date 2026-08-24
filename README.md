@@ -13,6 +13,8 @@ PYTHONPATH=src python -m unittest discover -s tests
 `NOTION_API_KEY` または `NOTION_TOKEN` に Notion Integration のトークンを設定すると、
 `NotionClient` から本棚データソースへ書籍ページを作成できます。
 書き込み先は `NOTION_BOOKSHELF_DATA_SOURCE_ID` に UUID 形式のデータソースIDとして設定します。
+Integration には対象データソースを共有し、重複チェックのための Read content と
+ページ作成のための Insert content capability を付与してください。
 
 ```python
 from notion_book_register import Book, NotionClient
@@ -31,6 +33,12 @@ page = client.create_book_page(
 )
 print(page.url)
 ```
+
+`create_book_page` は登録前に `memo` の `ISBN: <ISBN-13>` を検索し、同じ ISBN のページが
+存在する場合は新規作成せず既存ページを返します。戻り値の `created` が `False` の場合は
+既存ページです。重複チェックを行わずに作成したい場合は `prevent_duplicates=False` を指定します。
+ただし、この重複チェックは検索してから作成する非原子的な処理です。同じ ISBN の登録が並列で
+実行された場合は、Notion 側に重複ページが作成される可能性があります。
 
 対象の Notion 側スキーマに合わせて、`作品名` は title、`状態` と `ジャンル` は select、
 `memo` は rich text として送信します。
