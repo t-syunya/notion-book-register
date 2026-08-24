@@ -12,20 +12,30 @@ from notion_book_register.ndl_client import (
 )
 from notion_book_register.notion_client import CreatedNotionPage, NotionApiError, NotionClient
 from notion_book_register.notion_mapping import book_to_notion_properties
+from notion_book_register.vlm_prompt import (
+    IsbnExtractionResult,
+    VlmPromptError,
+    build_isbn_extraction_messages,
+    parse_isbn_extraction_response,
+)
 
 __all__ = [
     "Book",
     "CreatedNotionPage",
     "InvalidIsbnError",
+    "IsbnExtractionResult",
     "NdlApiError",
     "NdlClient",
     "NdlSruResponse",
     "NotionApiError",
     "NotionClient",
+    "VlmPromptError",
     "book_from_ndl_record",
     "book_from_sru_response",
     "book_to_notion_properties",
+    "build_isbn_extraction_messages",
     "normalize_isbn13",
+    "parse_isbn_extraction_response",
     "parse_sru_response",
     "validate_isbn13",
 ]
