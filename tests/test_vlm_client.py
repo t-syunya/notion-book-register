@@ -234,8 +234,21 @@ class OpenAiVlmClientTest(unittest.TestCase):
             client.extract_isbn13(b"", mime_type="image/jpeg")
         with self.assertRaisesRegex(ValueError, "mime_type"):
             client.extract_isbn13(b"image", mime_type="")
-        with self.assertRaisesRegex(ValueError, "image MIME"):
+        with self.assertRaisesRegex(ValueError, "image/png"):
             client.extract_isbn13(b"image", mime_type="application/pdf")
+        with self.assertRaisesRegex(ValueError, "image/png"):
+            client.extract_isbn13(b"image", mime_type="image/svg+xml")
+
+    def test_extract_isbn13_wraps_invalid_extraction_output(self) -> None:
+        client = OpenAiVlmClient(
+            "token",
+            opener=lambda request, timeout: FakeResponse(b'{"output_text": "not json"}'),
+        )
+
+        with self.assertRaisesRegex(VlmApiError, "invalid ISBN extraction output") as context:
+            client.extract_isbn13(b"image", mime_type="image/jpeg")
+
+        self.assertIsNotNone(context.exception.__cause__)
 
     def test_extract_isbn13_rejects_missing_response_text(self) -> None:
         client = OpenAiVlmClient("token", opener=lambda request, timeout: FakeResponse(b"{}"))

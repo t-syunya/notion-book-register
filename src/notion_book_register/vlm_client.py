@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from notion_book_register.vlm_prompt import (
     ISBN_EXTRACTION_RESPONSE_SCHEMA,
     IsbnExtractionResult,
+    VlmPromptError,
     build_isbn_extraction_messages,
     parse_isbn_extraction_response,
 )
@@ -23,6 +24,7 @@ from notion_book_register.vlm_prompt import (
 OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_VLM_MODEL = "gpt-5-mini"
 _IMAGE_DETAILS = {"auto", "low", "high"}
+_SUPPORTED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 
 class VlmApiError(RuntimeError):
@@ -131,7 +133,12 @@ class OpenAiVlmClient:
         )
 
         payload = self._send_request(request)
-        return parse_isbn_extraction_response(_extract_response_text(payload))
+        try:
+            return parse_isbn_extraction_response(_extract_response_text(payload))
+        except VlmPromptError as error:
+            raise VlmApiError(
+                f"OpenAI API returned invalid ISBN extraction output: {error}"
+            ) from error
 
     def _send_request(self, request: Request) -> bytes:
         try:
@@ -226,8 +233,9 @@ def _normalize_image_mime_type(value: str) -> str:
     mime_type = value.strip().lower()
     if not mime_type:
         raise ValueError("mime_type is required.")
-    if not mime_type.startswith("image/"):
-        raise ValueError("mime_type must be an image MIME type.")
+    if mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+        supported = ", ".join(sorted(_SUPPORTED_IMAGE_MIME_TYPES))
+        raise ValueError(f"mime_type must be one of: {supported}.")
     return mime_type
 
 
