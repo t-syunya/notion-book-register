@@ -89,6 +89,42 @@ response = client.search_by_isbn_with_fallback(
 フォールバックはISBN検索の結果が0件の場合だけ実行されます。通信失敗や不正なレスポンスを
 検索結果なしとして扱わず、`NdlApiError` をそのまま返します。
 
+## 画像登録 API
+
+画像をbase64で送信し、VLMによるISBN抽出、NDL書誌検索、Notion登録を一度に実行できます。
+APIは既定で `127.0.0.1:8000` を使用し、Bearer token認証を必須とします。
+
+```bash
+export OPENAI_API_KEY="..."
+export NOTION_API_KEY="..."
+export NOTION_BOOKSHELF_DATA_SOURCE_ID="..."
+export BOOK_REGISTER_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+uv run notion-book-register-api
+```
+
+`POST /v1/books` へ `application/json` を送信します。
+
+```json
+{
+  "image": "<base64 encoded image>",
+  "mime_type": "image/jpeg",
+  "title": "ISBN検索失敗時だけ使うタイトル（省略可）",
+  "author": "ISBN検索失敗時だけ使う著者（省略可）",
+  "genre": "技術書"
+}
+```
+
+`title` と `author` は片方だけ指定できません。画像サイズの既定上限は10 MiBで、
+`BOOK_REGISTER_MAX_IMAGE_BYTES` から変更できます。外部公開する場合は
+`BOOK_REGISTER_HOST` を明示し、TLS終端を備えたリバースプロキシの背後で実行してください。
+稼働確認には認証不要の `GET /healthz` を利用できます。
+
+サーバー側の読取タイムアウトは `BOOK_REGISTER_REQUEST_TIMEOUT_SECONDS`（既定15秒）、
+同時処理数は `BOOK_REGISTER_MAX_CONCURRENT_REQUESTS`（既定16）で制限します。外部公開時は
+リバースプロキシ側にもheader/body timeout、body size、connection limitを必ず設定してください。
+同一のサービスインスタンスを通るNotion書き込みは直列化されますが、複数インスタンス、
+複数process、複数ホストを跨ぐ重複登録は完全には防止できません。
+
 ## 実装順
 
 Notion の `Project Issues` の親子関係、優先度、外部依存の少なさから、次の順で進めます。

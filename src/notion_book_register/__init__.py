@@ -12,6 +12,13 @@ from notion_book_register.ndl_client import (
 )
 from notion_book_register.notion_client import CreatedNotionPage, NotionApiError, NotionClient
 from notion_book_register.notion_mapping import book_to_notion_properties
+from notion_book_register.registration import (
+    BookNotFoundError,
+    BookRegistrationError,
+    BookRegistrationService,
+    IsbnNotDetectedError,
+    RegisteredBook,
+)
 from notion_book_register.vlm_client import (
     OpenAiVlmClient,
     OpenAiVlmConfig,
@@ -27,9 +34,13 @@ from notion_book_register.vlm_prompt import (
 
 __all__ = [
     "Book",
+    "BookNotFoundError",
+    "BookRegistrationError",
+    "BookRegistrationService",
     "CreatedNotionPage",
     "InvalidIsbnError",
     "IsbnExtractionResult",
+    "IsbnNotDetectedError",
     "NdlApiError",
     "NdlClient",
     "NdlSruResponse",
@@ -37,6 +48,7 @@ __all__ = [
     "NotionClient",
     "OpenAiVlmClient",
     "OpenAiVlmConfig",
+    "RegisteredBook",
     "VlmApiError",
     "VlmProvider",
     "VlmPromptError",
