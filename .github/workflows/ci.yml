@@ -11,12 +11,8 @@ permissions:
 
 jobs:
   python:
-    name: Python ${{ matrix.python-version }}
+    name: Python 3.11
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +24,7 @@ jobs:
         with:
           enable-cache: true
           version: "0.12.7"
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
       - name: Install Python
         run: uv python install
