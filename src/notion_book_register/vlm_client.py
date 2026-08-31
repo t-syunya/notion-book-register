@@ -301,14 +301,14 @@ def _iter_content_items(item: dict[str, Any]) -> tuple[dict[str, Any], ...]:
 def _read_http_error_payload(error: HTTPError) -> bytes:
     try:
         return error.read()
-    except (AttributeError, HTTPException, OSError):
+    except AttributeError, HTTPException, OSError:
         return b""
 
 
 def _close_http_error(error: HTTPError) -> None:
     try:
         error.close()
-    except (AttributeError, HTTPException, OSError):
+    except AttributeError, HTTPException, OSError:
         return
 
 
@@ -322,7 +322,7 @@ def _openai_http_error_message(status_code: int, payload: bytes) -> str:
 def _openai_error_detail(payload: bytes) -> str | None:
     try:
         data = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None

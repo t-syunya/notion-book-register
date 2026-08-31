@@ -4,8 +4,21 @@ iPhone で撮影した書籍画像から ISBN を抽出し、国立国会図書�
 
 ## 開発
 
+Python 3.14 と依存関係は uv で管理します。開発環境の構築時は次を実行してください。
+
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests
+uv sync
+```
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Lint とフォーマット確認:
+
+```bash
+uv run ruff format --check .
+uv run ruff check .
 ```
 
 ## VLM ISBN 抽出
