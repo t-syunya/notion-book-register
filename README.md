@@ -5,7 +5,18 @@ iPhone で撮影した書籍画像から ISBN を抽出し、国立国会図書�
 ## 開発
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests
+uv sync --extra dev
+```
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Lint とフォーマット確認:
+
+```bash
+uv run ruff format --check .
+uv run ruff check .
 ```
 
 ## VLM ISBN 抽出
