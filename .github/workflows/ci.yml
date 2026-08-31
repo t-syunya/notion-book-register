@@ -23,14 +23,12 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
-          version: "0.12.7"
-          python-version: "3.14"
 
       - name: Install Python
         run: uv python install
 
       - name: Install the project
-        run: uv sync --locked --extra dev
+        run: uv sync --locked
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -40,3 +38,6 @@ jobs:
 
       - name: Test
         run: uv run python -m unittest discover -s tests
+
+      - name: Build package
+        run: uv build

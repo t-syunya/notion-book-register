@@ -4,8 +4,10 @@ iPhone で撮影した書籍画像から ISBN を抽出し、国立国会図書�
 
 ## 開発
 
+Python 3.14 と依存関係は uv で管理します。開発環境の構築時は次を実行してください。
+
 ```bash
-uv sync --extra dev
+uv sync
 ```
 
 ```bash

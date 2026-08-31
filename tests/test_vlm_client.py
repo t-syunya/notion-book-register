@@ -16,7 +16,7 @@ class FakeResponse:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    def __enter__(self) -> "FakeResponse":
+    def __enter__(self) -> FakeResponse:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -30,7 +30,7 @@ class ErrorResponse:
     def __init__(self, error: Exception) -> None:
         self._error = error
 
-    def __enter__(self) -> "ErrorResponse":
+    def __enter__(self) -> ErrorResponse:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

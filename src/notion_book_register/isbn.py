@@ -29,7 +29,7 @@ def validate_isbn13(value: str) -> bool:
 
     try:
         digits = _extract_digits(value)
-    except (InvalidIsbnError, TypeError):
+    except InvalidIsbnError, TypeError:
         return False
 
     if len(digits) != 13:
