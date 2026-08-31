@@ -71,6 +71,24 @@ print(page.url)
 対象の Notion 側スキーマに合わせて、`作品名` は title、`状態` と `ジャンル` は select、
 `memo` は rich text として送信します。
 
+## NDL 検索フォールバック
+
+ISBN検索で書誌が見つからない場合は、既知のタイトルと著者を使って再検索できます。
+
+```python
+from notion_book_register import NdlClient
+
+client = NdlClient()
+response = client.search_by_isbn_with_fallback(
+    "9784297135782",
+    title="Python Testing",
+    author="Author A",
+)
+```
+
+フォールバックはISBN検索の結果が0件の場合だけ実行されます。通信失敗や不正なレスポンスを
+検索結果なしとして扱わず、`NdlApiError` をそのまま返します。
+
 ## 実装順
 
 Notion の `Project Issues` の親子関係、優先度、外部依存の少なさから、次の順で進めます。
