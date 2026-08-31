@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   python:
-    name: Python 3.11
+    name: Python 3.14
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +24,7 @@ jobs:
         with:
           enable-cache: true
           version: "0.12.7"
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Install Python
         run: uv python install
