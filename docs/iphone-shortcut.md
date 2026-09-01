@@ -6,8 +6,13 @@
 
 ## 事前準備
 
-1. APIサーバーに `BOOK_REGISTER_API_TOKEN` を設定して起動します。トークンは32文字以上の
-   英数字・記号で生成します。
+1. APIサーバーに `BOOK_REGISTER_API_TOKEN` を設定して起動します。トークンは32〜512文字の
+   ASCII文字で、使用できる文字は英数字と `.`、`_`、`~`、`+`、`/`、`=`、`-` です。次のコマンドで
+   生成できます。
+
+   ```bash
+   export BOOK_REGISTER_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+   ```
 2. APIの公開URLを用意します。インターネット越しに使う場合は、TLS終端を行うリバースプロキシ
    配下の `https://` URLを使用します。
 3. ショートカットを新規作成し、名称を「本をNotionに登録」などにします。
