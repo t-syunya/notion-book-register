@@ -608,6 +608,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                         response += chunk
 
                     self.assertIn(f" {expected_status.value} ".encode("ascii"), response)
+                    self.assertIn(b"Connection: close", response)
                     self.assertTrue(response.endswith(b"\r\n\r\n"))
                 finally:
                     client.close()
