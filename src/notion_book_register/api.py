@@ -226,6 +226,7 @@ def make_handler(
 
     class BookRegistrationHandler(BaseHTTPRequestHandler):
         server_version = "notion-book-register/0.1"
+        protocol_version = "HTTP/1.1"
 
         def setup(self) -> None:
             super().setup()
