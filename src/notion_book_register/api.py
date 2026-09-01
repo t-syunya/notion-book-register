@@ -391,13 +391,14 @@ def make_handler(
             self._cancel_read_deadline()
             if urlsplit(self.path).path == HEALTH_PATH:
                 body = _json_body({"status": "ok"})
+                self.close_connection = True
                 self.send_response(HTTPStatus.OK.value)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
-            self._write_method_not_allowed(urlsplit(self.path).path)
+            self._write_method_not_allowed(urlsplit(self.path).path, include_body=False)
 
         def _read_json_body(self, *, max_request_bytes: int) -> bytes:
             content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
@@ -449,13 +450,14 @@ def make_handler(
                 and hmac.compare_digest(token, expected_token)
             )
 
-        def _write_method_not_allowed(self, path: str) -> None:
+        def _write_method_not_allowed(self, path: str, *, include_body: bool = True) -> None:
             self._cancel_read_deadline()
             if path == REGISTER_BOOK_PATH:
                 self._write_json(
                     HTTPStatus.METHOD_NOT_ALLOWED,
                     {"error": "Method not allowed."},
                     extra_headers={"Allow": "POST"},
+                    include_body=include_body,
                 )
                 return
             if path == SHORTCUT_REGISTER_BOOK_PATH:
@@ -466,6 +468,7 @@ def make_handler(
                         message="このendpointにはPOSTを使用してください。",
                     ),
                     extra_headers={"Allow": "POST"},
+                    include_body=include_body,
                 )
                 return
             if path == HEALTH_PATH:
@@ -476,6 +479,7 @@ def make_handler(
                         message="このendpointにはGETを使用してください。",
                     ),
                     extra_headers={"Allow": "GET, HEAD"},
+                    include_body=include_body,
                 )
                 return
             self._write_json(
@@ -484,6 +488,7 @@ def make_handler(
                     code="not_found",
                     message="指定されたAPI endpointはありません。",
                 ),
+                include_body=include_body,
             )
 
         def _write_error(
@@ -530,6 +535,7 @@ def make_handler(
             payload: dict[str, Any],
             *,
             extra_headers: Mapping[str, str] | None = None,
+            include_body: bool = True,
         ) -> None:
             body = _json_body(payload)
             try:
@@ -541,7 +547,8 @@ def make_handler(
                 for name, value in (extra_headers or {}).items():
                     self.send_header(name, value)
                 self.end_headers()
-                self.wfile.write(body)
+                if include_body:
+                    self.wfile.write(body)
             except OSError:
                 return
 

@@ -580,6 +580,37 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(response, {"status": "ok"})
 
+    def test_head_responses_do_not_include_a_body(self) -> None:
+        for path, expected_status in (
+            ("/healthz", HTTPStatus.OK),
+            ("/v1/books", HTTPStatus.METHOD_NOT_ALLOWED),
+            ("/v2/books", HTTPStatus.METHOD_NOT_ALLOWED),
+            ("/unknown", HTTPStatus.NOT_FOUND),
+        ):
+            with self.subTest(path=path):
+                handler = make_handler(
+                    FakeRegistrationService(), api_token=TEST_TOKEN, max_image_bytes=100
+                )
+                handler.log_message = lambda self, format, *args: None
+                server = BookRegistrationHttpServer(("127.0.0.1", 0), handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                client = socket.create_connection(server.server_address, timeout=1)
+                try:
+                    request = f"HEAD {path} HTTP/1.1\r\nHost: {server.server_address[0]}\r\n\r\n"
+                    client.sendall(request.encode("ascii"))
+                    response = b""
+                    while chunk := client.recv(4096):
+                        response += chunk
+
+                    self.assertIn(f" {expected_status.value} ".encode("ascii"), response)
+                    self.assertTrue(response.endswith(b"\r\n\r\n"))
+                finally:
+                    client.close()
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
+
     def _request(self, service, method, path, *, body=None, headers=None):
         handler = make_handler(service, api_token=TEST_TOKEN, max_image_bytes=100)
         handler.log_message = lambda self, format, *args: None
