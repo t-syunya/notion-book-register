@@ -396,6 +396,7 @@ def make_handler(
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "close")
                 for name, value in (extra_headers or {}).items():
                     self.send_header(name, value)
                 self.end_headers()
