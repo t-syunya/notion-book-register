@@ -157,7 +157,7 @@ def _normalize_search_term(value: str, *, field: str) -> str:
 
 
 def _escape_cql_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("*", "\\*").replace("?", "\\?")
 
 
 def parse_sru_response(payload: bytes) -> NdlSruResponse:
