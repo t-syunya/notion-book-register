@@ -114,8 +114,8 @@ class NdlClientTest(unittest.TestCase):
         client = NdlClient(opener=opener)
 
         response = client.search_by_title_and_author(
-            '  Python  "Testing"  ',
-            "Author \\ A",
+            '  What  If?  "Testing"  ',
+            "Author * \\ A",
             maximum_records=3,
         )
 
@@ -124,7 +124,7 @@ class NdlClientTest(unittest.TestCase):
         self.assertEqual(params["maximumRecords"], ["3"])
         self.assertEqual(
             params["query"],
-            ['title = "Python \\"Testing\\"" AND creator = "Author \\\\ A"'],
+            ['title = "What If\\? \\"Testing\\"" AND creator = "Author \\* \\\\ A"'],
         )
 
     def test_search_by_title_and_author_rejects_empty_terms(self) -> None:
