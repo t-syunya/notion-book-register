@@ -161,6 +161,9 @@ HTTP 503と `{"error":"Server is busy."}` を返します。この場合は `ok`
 同一のサービスインスタンスを通るNotion書き込みは直列化されますが、複数インスタンス、
 複数process、複数ホストを跨ぐ重複登録は完全には防止できません。
 
+iPhoneショートカットの具体的な作成・エラー分岐手順は
+[docs/iphone-shortcut.md](docs/iphone-shortcut.md) を参照してください。
+
 ## 実装順
 
 Notion の `Project Issues` の親子関係、優先度、外部依存の少なさから、次の順で進めます。
