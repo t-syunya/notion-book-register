@@ -216,6 +216,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(response["result"]["page_id"], "page-id")
         self.assertTrue(response["result"]["created"])
         self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Connection"], "close")
         self.assertEqual(service.calls[0][:2], (b"image bytes", "image/jpeg"))
 
     def test_post_requires_valid_bearer_token_without_calling_service(self) -> None:
@@ -468,7 +469,9 @@ class BookRegistrationEndpointTest(unittest.TestCase):
             self.assertTrue(client.recv(4096).startswith(b"HTTP/1.1 100 Continue\r\n\r\n"))
 
             client.sendall(body)
-            self.assertIn(b"201 Created", client.recv(4096))
+            response = client.recv(4096)
+            self.assertIn(b"201 Created", response)
+            self.assertIn(b"Connection: close", response)
             self.assertEqual(service.calls[0][:2], (b"image bytes", "image/jpeg"))
         finally:
             client.close()
@@ -571,7 +574,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_health_endpoint_does_not_require_authentication(self) -> None:
-        status, response, _headers = self._request(
+        status, response, headers = self._request(
             FakeRegistrationService(),
             "GET",
             "/healthz",
@@ -579,6 +582,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
 
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(response, {"status": "ok"})
+        self.assertEqual(headers["Connection"], "close")
 
     def test_head_responses_do_not_include_a_body(self) -> None:
         for path, expected_status in (
@@ -604,6 +608,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                         response += chunk
 
                     self.assertIn(f" {expected_status.value} ".encode("ascii"), response)
+                    self.assertIn(b"Connection: close", response)
                     self.assertTrue(response.endswith(b"\r\n\r\n"))
                 finally:
                     client.close()
