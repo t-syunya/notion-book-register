@@ -179,6 +179,39 @@ class NdlClientTest(unittest.TestCase):
             ['title = "Python Testing" AND creator = "Author A"'],
         )
 
+    def test_fallback_response_keeps_the_requested_isbn_for_book_normalization(self) -> None:
+        empty_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+</searchRetrieveResponse>"""
+        alternate_edition_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records><record><recordData>
+    <dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+      xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <dcndl:title>Python Testing</dcndl:title>
+      <dc:identifier>9784873115658</dc:identifier>
+    </dcndl:BibResource>
+  </recordData></record></records>
+</searchRetrieveResponse>"""
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                empty_response if len(requests) == 1 else alternate_edition_response
+            )
+
+        response = NdlClient(opener=opener).search_by_isbn_with_fallback(
+            "9784297135782",
+            title="Python Testing",
+            author="Author A",
+        )
+
+        book = book_from_sru_response(response, isbn13="9784297135782")
+
+        self.assertIsNotNone(book)
+        self.assertEqual(book.isbn13, "9784297135782")
+
     def test_search_by_isbn_with_fallback_handles_ndl_no_record_diagnostic(self) -> None:
         requests = []
         no_record_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
