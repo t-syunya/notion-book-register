@@ -228,6 +228,28 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.INTERNAL_SERVER_ERROR)
         self.assertNotIn("secret", response["error"])
 
+    def test_post_accepts_a_json_escaped_base64_value_within_image_limit(self) -> None:
+        image = b"\xff" * (50 * 1024)
+        escaped_image = base64.b64encode(image).decode("ascii").replace("/", "\\/")
+        body = f'{{"image":"{escaped_image}","mime_type":"image/jpeg"}}'.encode("ascii")
+        service = FakeRegistrationService()
+
+        status, response, _headers = self._request(
+            service,
+            "POST",
+            "/v1/books",
+            body=body,
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            max_image_bytes=len(image),
+        )
+
+        self.assertEqual(status, HTTPStatus.CREATED)
+        self.assertEqual(response["isbn13"], "9784297135782")
+        self.assertEqual(service.calls[0][0], image)
+
     def test_partial_body_times_out_and_server_remains_available(self) -> None:
         handler = make_handler(
             FakeRegistrationService(),
@@ -402,8 +424,8 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(response, {"status": "ok"})
         self.assertEqual(headers["Connection"], "close")
 
-    def _request(self, service, method, path, *, body=None, headers=None):
-        handler = make_handler(service, api_token=TEST_TOKEN, max_image_bytes=100)
+    def _request(self, service, method, path, *, body=None, headers=None, max_image_bytes=100):
+        handler = make_handler(service, api_token=TEST_TOKEN, max_image_bytes=max_image_bytes)
         handler.log_message = lambda self, format, *args: None
         server = BookRegistrationHttpServer(("127.0.0.1", 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
