@@ -263,6 +263,17 @@ def make_handler(
             except BrokenPipeError, ConnectionResetError:
                 return
 
+        def send_error(
+            self,
+            code: int,
+            message: str | None = None,
+            explain: str | None = None,
+        ) -> None:
+            if code == HTTPStatus.NOT_IMPLEMENTED.value and hasattr(self, "path"):
+                self._write_method_not_allowed(urlsplit(self.path).path)
+                return
+            super().send_error(code, message, explain)
+
         def do_GET(self) -> None:
             self._cancel_read_deadline()
             path = urlsplit(self.path).path

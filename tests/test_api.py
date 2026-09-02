@@ -370,7 +370,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertIsInstance(response["error"], str)
 
     def test_v2_rejects_unsupported_methods_with_json_error(self) -> None:
-        for method in ("GET", "PUT", "PATCH", "DELETE", "OPTIONS"):
+        for method in ("GET", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"):
             with self.subTest(method=method):
                 status, response, headers = self._request(
                     FakeRegistrationService(),
@@ -512,7 +512,6 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                     connection.request(
                         "POST",
                         path,
-                        body=b"{}",
                         headers={"Content-Type": "application/json"},
                     )
                     response = connection.getresponse()

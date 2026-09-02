@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.client import HTTPException
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -35,6 +35,7 @@ class NdlSruResponse:
 
     number_of_records: int
     records_xml: tuple[str, ...]
+    requested_isbn13: str | None = None
 
     @property
     def found(self) -> bool:
@@ -98,13 +99,17 @@ class NdlClient:
     ) -> NdlSruResponse:
         """Search by ISBN, then by title and author when no record is returned."""
 
-        response = self.search_by_isbn(isbn13, maximum_records=maximum_records)
+        normalized_isbn = normalize_isbn13(isbn13)
+        response = self.search_by_isbn(normalized_isbn, maximum_records=maximum_records)
         if response.number_of_records != 0:
             return response
-        return self.search_by_title_and_author(
-            title,
-            author,
-            maximum_records=maximum_records,
+        return replace(
+            self.search_by_title_and_author(
+                title,
+                author,
+                maximum_records=maximum_records,
+            ),
+            requested_isbn13=normalized_isbn,
         )
 
     def _search(self, query: str, *, maximum_records: int) -> NdlSruResponse:
@@ -205,10 +210,19 @@ def book_from_sru_response(response: NdlSruResponse, *, isbn13: str | None = Non
 
     if not response.found:
         return None
-    return book_from_ndl_record(response.records_xml[0], isbn13=isbn13)
+    return book_from_ndl_record(
+        response.records_xml[0],
+        isbn13=response.requested_isbn13 or isbn13,
+        prefer_isbn13=response.requested_isbn13 is not None,
+    )
 
 
-def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
+def book_from_ndl_record(
+    record_xml: str,
+    *,
+    isbn13: str | None = None,
+    prefer_isbn13: bool = False,
+) -> Book:
     """Normalize a DC-NDL bibliographic XML record to the internal Book model."""
 
     root = _parse_xml(record_xml, "NDL bibliographic record is invalid XML.")
@@ -219,7 +233,7 @@ def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
 
     record_isbn = _extract_record_isbn(root)
     fallback_isbn = normalize_isbn13(isbn13) if isbn13 is not None else None
-    normalized_isbn = record_isbn or fallback_isbn
+    normalized_isbn = fallback_isbn if prefer_isbn13 else record_isbn or fallback_isbn
     if normalized_isbn is None:
         raise NdlApiError("NDL bibliographic record is missing ISBN-13.")
 
