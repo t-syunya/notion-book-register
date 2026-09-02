@@ -100,7 +100,7 @@ class NdlClient:
         """Search by ISBN, then by title and author when no record is returned."""
 
         normalized_isbn = normalize_isbn13(isbn13)
-        response = self.search_by_isbn(normalized_isbn, maximum_records=maximum_records)
+        response = self._search(f'isbn="{normalized_isbn}"', maximum_records=maximum_records)
         if response.number_of_records != 0:
             return response
         return replace(
