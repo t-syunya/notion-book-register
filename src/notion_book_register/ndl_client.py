@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.client import HTTPException
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -35,6 +35,7 @@ class NdlSruResponse:
 
     number_of_records: int
     records_xml: tuple[str, ...]
+    requested_isbn13: str | None = None
 
     @property
     def found(self) -> bool:
@@ -54,7 +55,7 @@ class _Opener(Protocol):
 
 
 class NdlClient:
-    """Small SRU client for ISBN based book lookup."""
+    """Small SRU client for ISBN, title, and author based book lookup."""
 
     def __init__(
         self,
@@ -69,11 +70,54 @@ class NdlClient:
         """Search NDL bibliographic records by ISBN-13."""
 
         normalized_isbn = normalize_isbn13(isbn13)
+        return self._search(f'isbn="{normalized_isbn}"', maximum_records=maximum_records)
+
+    def search_by_title_and_author(
+        self,
+        title: str,
+        author: str,
+        *,
+        maximum_records: int = 1,
+    ) -> NdlSruResponse:
+        """Search NDL bibliographic records by title and author."""
+
+        normalized_title = _normalize_search_term(title, field="title")
+        normalized_author = _normalize_search_term(author, field="author")
+        query = (
+            f'title = "{_escape_cql_string(normalized_title)}" '
+            f'AND creator = "{_escape_cql_string(normalized_author)}"'
+        )
+        return self._search(query, maximum_records=maximum_records)
+
+    def search_by_isbn_with_fallback(
+        self,
+        isbn13: str,
+        *,
+        title: str,
+        author: str,
+        maximum_records: int = 1,
+    ) -> NdlSruResponse:
+        """Search by ISBN, then by title and author when no record is returned."""
+
+        normalized_isbn = normalize_isbn13(isbn13)
+        response = self._search(f'isbn="{normalized_isbn}"', maximum_records=maximum_records)
+        if response.number_of_records != 0:
+            return response
+        return replace(
+            self.search_by_title_and_author(
+                title,
+                author,
+                maximum_records=maximum_records,
+            ),
+            requested_isbn13=normalized_isbn,
+        )
+
+    def _search(self, query: str, *, maximum_records: int) -> NdlSruResponse:
         if maximum_records < 1:
             raise ValueError("maximum_records must be greater than or equal to 1.")
 
         request = Request(
-            self._build_search_url(normalized_isbn, maximum_records),
+            self._build_search_url(query, maximum_records),
             headers={"User-Agent": "notion-book-register/0.1"},
         )
         try:
@@ -93,7 +137,7 @@ class NdlClient:
 
         return parse_sru_response(payload)
 
-    def _build_search_url(self, isbn13: str, maximum_records: int) -> str:
+    def _build_search_url(self, query_expression: str, maximum_records: int) -> str:
         query = urlencode(
             {
                 "operation": "searchRetrieve",
@@ -102,10 +146,23 @@ class NdlClient:
                 "recordPacking": "xml",
                 "onlyBib": "true",
                 "maximumRecords": str(maximum_records),
-                "query": f'isbn="{isbn13}"',
+                "query": query_expression,
             }
         )
         return f"{NDL_SRU_API_URL}?{query}"
+
+
+def _normalize_search_term(value: str, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string.")
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError(f"{field} must not be empty.")
+    return normalized
+
+
+def _escape_cql_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("*", "\\*").replace("?", "\\?")
 
 
 def parse_sru_response(payload: bytes) -> NdlSruResponse:
@@ -113,6 +170,18 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
 
     root = _parse_xml(payload, "NDL API returned invalid XML.")
 
+    if _has_no_records_diagnostic(root):
+        number_of_records_text = root.findtext("sru:numberOfRecords", namespaces=_NAMESPACES)
+        if number_of_records_text is not None:
+            try:
+                number_of_records = int(number_of_records_text)
+            except ValueError as error:
+                raise NdlApiError("NDL API response has invalid numberOfRecords.") from error
+            if number_of_records != 0:
+                raise NdlApiError("NDL API no-record diagnostic conflicts with numberOfRecords.")
+        if _record_xml_values(root):
+            raise NdlApiError("NDL API no-record diagnostic conflicts with record data.")
+        return NdlSruResponse(number_of_records=0, records_xml=())
     _raise_for_diagnostics(root)
 
     number_of_records_text = root.findtext("sru:numberOfRecords", namespaces=_NAMESPACES)
@@ -126,12 +195,12 @@ def parse_sru_response(payload: bytes) -> NdlSruResponse:
     if number_of_records < 0:
         raise NdlApiError("NDL API response has invalid numberOfRecords.")
 
-    records_xml = []
-    for record_data in root.findall(".//sru:recordData", namespaces=_NAMESPACES):
-        children = list(record_data)
-        if not children:
-            continue
-        records_xml.append(ElementTree.tostring(children[0], encoding="unicode"))
+    records_xml = _record_xml_values(root)
+
+    if number_of_records > 0 and not records_xml:
+        raise NdlApiError("NDL API response reports records but is missing record data.")
+    if number_of_records == 0 and records_xml:
+        raise NdlApiError("NDL API response reports no records but includes record data.")
 
     return NdlSruResponse(number_of_records=number_of_records, records_xml=tuple(records_xml))
 
@@ -141,10 +210,19 @@ def book_from_sru_response(response: NdlSruResponse, *, isbn13: str | None = Non
 
     if not response.found:
         return None
-    return book_from_ndl_record(response.records_xml[0], isbn13=isbn13)
+    return book_from_ndl_record(
+        response.records_xml[0],
+        isbn13=response.requested_isbn13 or isbn13,
+        prefer_isbn13=response.requested_isbn13 is not None,
+    )
 
 
-def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
+def book_from_ndl_record(
+    record_xml: str,
+    *,
+    isbn13: str | None = None,
+    prefer_isbn13: bool = False,
+) -> Book:
     """Normalize a DC-NDL bibliographic XML record to the internal Book model."""
 
     root = _parse_xml(record_xml, "NDL bibliographic record is invalid XML.")
@@ -155,7 +233,7 @@ def book_from_ndl_record(record_xml: str, *, isbn13: str | None = None) -> Book:
 
     record_isbn = _extract_record_isbn(root)
     fallback_isbn = normalize_isbn13(isbn13) if isbn13 is not None else None
-    normalized_isbn = record_isbn or fallback_isbn
+    normalized_isbn = fallback_isbn if prefer_isbn13 else record_isbn or fallback_isbn
     if normalized_isbn is None:
         raise NdlApiError("NDL bibliographic record is missing ISBN-13.")
 
@@ -177,10 +255,7 @@ def _parse_xml(payload: bytes | str, error_message: str) -> ElementTree.Element:
 
 
 def _raise_for_diagnostics(root: ElementTree.Element) -> None:
-    diagnostics = [
-        *root.findall(".//sru:diagnostic", namespaces=_NAMESPACES),
-        *root.findall(".//diag:diagnostic", namespaces=_NAMESPACES),
-    ]
+    diagnostics = _diagnostics(root)
     if not diagnostics:
         return
 
@@ -199,6 +274,38 @@ def _raise_for_diagnostics(root: ElementTree.Element) -> None:
 
     message = "; ".join(messages) if messages else "unknown diagnostic"
     raise NdlApiError(f"NDL API returned SRU diagnostics: {message}")
+
+
+def _diagnostics(root: ElementTree.Element) -> list[ElementTree.Element]:
+    return [
+        *root.findall(".//sru:diagnostic", namespaces=_NAMESPACES),
+        *root.findall(".//diag:diagnostic", namespaces=_NAMESPACES),
+    ]
+
+
+def _has_no_records_diagnostic(root: ElementTree.Element) -> bool:
+    diagnostics = _diagnostics(root)
+    if not diagnostics:
+        return False
+    return all(_is_no_records_diagnostic(diagnostic) for diagnostic in diagnostics)
+
+
+def _is_no_records_diagnostic(diagnostic: ElementTree.Element) -> bool:
+    uri = _find_child_text(diagnostic, "uri")
+    message = _find_child_text(diagnostic, "message")
+    if message is not None and message.strip():
+        return message.strip().casefold() == "record does not exist"
+    return bool(uri is not None and uri.strip().rstrip("/").endswith("/65"))
+
+
+def _record_xml_values(root: ElementTree.Element) -> list[str]:
+    records_xml = []
+    for record_data in root.findall(".//sru:recordData", namespaces=_NAMESPACES):
+        children = list(record_data)
+        if not children:
+            continue
+        records_xml.append(ElementTree.tostring(children[0], encoding="unicode"))
+    return records_xml
 
 
 def _find_child_text(element: ElementTree.Element, local_name: str) -> str | None:

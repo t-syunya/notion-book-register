@@ -104,6 +104,226 @@ class NdlClientTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.search_by_isbn("9784297135782", maximum_records=0)
 
+    def test_search_by_title_and_author_builds_combined_query(self) -> None:
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(SRU_RESPONSE)
+
+        client = NdlClient(opener=opener)
+
+        response = client.search_by_title_and_author(
+            '  What  If?  "Testing"  ',
+            "Author * \\ A",
+            maximum_records=3,
+        )
+
+        self.assertTrue(response.found)
+        params = parse_qs(urlparse(requests[0].full_url).query)
+        self.assertEqual(params["maximumRecords"], ["3"])
+        self.assertEqual(
+            params["query"],
+            ['title = "What If\\? \\"Testing\\"" AND creator = "Author \\* \\\\ A"'],
+        )
+
+    def test_search_by_title_and_author_rejects_empty_terms(self) -> None:
+        client = NdlClient(opener=lambda request, timeout: FakeResponse(SRU_RESPONSE))
+
+        for title, author, message in (("", "Author", "title"), ("Title", "  ", "author")):
+            with self.subTest(title=title, author=author):
+                with self.assertRaisesRegex(ValueError, message):
+                    client.search_by_title_and_author(title, author)
+
+    def test_search_by_isbn_with_fallback_skips_fallback_when_isbn_matches(self) -> None:
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(SRU_RESPONSE)
+
+        client = NdlClient(opener=opener)
+
+        response = client.search_by_isbn_with_fallback(
+            "9784297135782",
+            title="Python Testing",
+            author="Author A",
+        )
+
+        self.assertTrue(response.found)
+        self.assertEqual(len(requests), 1)
+
+    def test_search_by_isbn_with_fallback_searches_title_and_author_after_no_match(self) -> None:
+        requests = []
+        empty_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+</searchRetrieveResponse>"""
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(empty_response if len(requests) == 1 else SRU_RESPONSE)
+
+        client = NdlClient(opener=opener)
+
+        response = client.search_by_isbn_with_fallback(
+            "9784297135782",
+            title="Python Testing",
+            author="Author A",
+        )
+
+        self.assertTrue(response.found)
+        self.assertEqual(len(requests), 2)
+        fallback_params = parse_qs(urlparse(requests[1].full_url).query)
+        self.assertEqual(
+            fallback_params["query"],
+            ['title = "Python Testing" AND creator = "Author A"'],
+        )
+
+    def test_fallback_response_keeps_the_requested_isbn_for_book_normalization(self) -> None:
+        empty_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+</searchRetrieveResponse>"""
+        alternate_edition_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records><record><recordData>
+    <dcndl:BibResource xmlns:dcndl="http://ndl.go.jp/dcndl/terms/"
+      xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <dcndl:title>Python Testing</dcndl:title>
+      <dc:identifier>9784873115658</dc:identifier>
+    </dcndl:BibResource>
+  </recordData></record></records>
+</searchRetrieveResponse>"""
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                empty_response if len(requests) == 1 else alternate_edition_response
+            )
+
+        response = NdlClient(opener=opener).search_by_isbn_with_fallback(
+            "9784297135782",
+            title="Python Testing",
+            author="Author A",
+        )
+
+        book = book_from_sru_response(response, isbn13="9784297135782")
+
+        self.assertIsNotNone(book)
+        self.assertEqual(book.isbn13, "9784297135782")
+
+    def test_search_by_isbn_with_fallback_handles_ndl_no_record_diagnostic(self) -> None:
+        requests = []
+        no_record_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <diagnostics>
+    <diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
+      <uri>info:srw/diagnostic/1/1</uri>
+      <message>Record does not exist</message>
+    </diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>"""
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(no_record_response if len(requests) == 1 else SRU_RESPONSE)
+
+        client = NdlClient(opener=opener)
+
+        response = client.search_by_isbn_with_fallback(
+            "9784297135782",
+            title="1984",
+            author="George Orwell",
+        )
+
+        self.assertTrue(response.found)
+        self.assertEqual(len(requests), 2)
+        fallback_params = parse_qs(urlparse(requests[1].full_url).query)
+        self.assertEqual(
+            fallback_params["query"],
+            ['title = "1984" AND creator = "George Orwell"'],
+        )
+
+    def test_search_by_isbn_with_fallback_returns_empty_when_fallback_has_no_record(self) -> None:
+        no_record_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <diagnostics>
+    <diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
+      <uri>info:srw/diagnostic/1/65</uri>
+      <message>Record does not exist</message>
+    </diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>"""
+        client = NdlClient(
+            opener=lambda request, timeout: FakeResponse(no_record_response),
+        )
+
+        response = client.search_by_isbn_with_fallback(
+            "9784297135782",
+            title="Missing Book",
+            author="Missing Author",
+        )
+
+        self.assertFalse(response.found)
+        self.assertEqual(response.number_of_records, 0)
+
+    def test_search_by_isbn_with_fallback_does_not_hide_invalid_isbn_response(self) -> None:
+        requests = []
+        inconsistent_response = b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records />
+</searchRetrieveResponse>"""
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(inconsistent_response)
+
+        client = NdlClient(opener=opener)
+
+        with self.assertRaisesRegex(NdlApiError, "missing record data"):
+            client.search_by_isbn_with_fallback(
+                "9784297135782",
+                title="Python Testing",
+                author="Author A",
+            )
+
+        self.assertEqual(len(requests), 1)
+
+    def test_parse_sru_response_rejects_conflicting_no_record_diagnostic(self) -> None:
+        conflicting_payloads = (
+            b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <diagnostics>
+    <diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
+      <uri>info:srw/diagnostic/1/1</uri>
+      <message>Record does not exist</message>
+    </diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>""",
+            b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <diagnostics>
+    <diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
+      <uri>info:srw/diagnostic/1/65</uri>
+      <message>illegal query syntax</message>
+    </diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>""",
+        )
+
+        for payload in conflicting_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(NdlApiError):
+                    parse_sru_response(payload)
+
+    def test_parse_sru_response_rejects_record_data_when_count_is_zero(self) -> None:
+        with self.assertRaisesRegex(NdlApiError, "reports no records"):
+            parse_sru_response(
+                b"""<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>0</numberOfRecords>
+  <records>
+    <record><recordData><book /></recordData></record>
+  </records>
+</searchRetrieveResponse>"""
+            )
+
     def test_search_by_isbn_wraps_http_error(self) -> None:
         def opener(request, timeout):
             raise HTTPError(request.full_url, 500, "Server Error", {}, None)
