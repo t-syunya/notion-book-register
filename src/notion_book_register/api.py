@@ -232,7 +232,10 @@ def make_handler(
     _validate_api_token(api_token, label="api_token")
     if max_image_bytes < 1:
         raise ValueError("max_image_bytes must be greater than or equal to 1.")
-    max_request_bytes = ((max_image_bytes + 2) // 3 * 4) + 64 * 1024
+    # A JSON serializer may escape every Base64 slash as `\\/`, doubling the
+    # encoded field length in the worst case. The decoded-image limit remains
+    # enforced by parse_registration_request.
+    max_request_bytes = (max_image_bytes * 8 // 3) + 64 * 1024
 
     class BookRegistrationHandler(BaseHTTPRequestHandler):
         server_version = "notion-book-register/0.1"
