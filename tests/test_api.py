@@ -7,7 +7,14 @@ import time
 import unittest
 from http import HTTPStatus
 
-from notion_book_register import Book, CreatedNotionPage, RegisteredBook
+from notion_book_register import (
+    Book,
+    BookNotFoundError,
+    CreatedNotionPage,
+    IsbnNotDetectedError,
+    RegisteredBook,
+    VlmApiError,
+)
 from notion_book_register.api import (
     ApiConfig,
     ApiRequestError,
@@ -134,6 +141,10 @@ class RegistrationRequestTest(unittest.TestCase):
                 json.dumps({"image": valid_image, "mime_type": "image/jpeg"}).encode(),
                 HTTPStatus.CONTENT_TOO_LARGE,
             ),
+            (
+                json.dumps({"image": small_image, "mime_type": "application/pdf"}).encode(),
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            ),
         )
 
         for payload, expected_status in invalid_payloads:
@@ -144,10 +155,9 @@ class RegistrationRequestTest(unittest.TestCase):
 
 
 class BookRegistrationEndpointTest(unittest.TestCase):
-    def test_post_registers_image_and_returns_created_page(self) -> None:
-        service = FakeRegistrationService()
-        status, response, headers = self._request(
-            service,
+    def test_v1_post_keeps_legacy_success_response(self) -> None:
+        status, response, _headers = self._request(
+            FakeRegistrationService(),
             "POST",
             "/v1/books",
             body=json.dumps(
@@ -166,6 +176,45 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(response["isbn13"], "9784297135782")
         self.assertEqual(response["page_id"], "page-id")
         self.assertTrue(response["created"])
+        self.assertNotIn("ok", response)
+
+    def test_v1_post_keeps_legacy_error_response(self) -> None:
+        status, response, headers = self._request(
+            FakeRegistrationService(),
+            "POST",
+            "/v1/books",
+            body=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(status, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(response, {"error": "Authorization bearer token is invalid."})
+        self.assertEqual(headers["WWW-Authenticate"], "Bearer")
+
+    def test_post_registers_image_and_returns_created_page(self) -> None:
+        service = FakeRegistrationService()
+        status, response, headers = self._request(
+            service,
+            "POST",
+            "/v2/books",
+            body=json.dumps(
+                {
+                    "image": base64.b64encode(b"image bytes").decode("ascii"),
+                    "mime_type": "image/jpeg",
+                }
+            ).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        self.assertEqual(status, HTTPStatus.CREATED)
+        self.assertTrue(response["ok"])
+        self.assertIn("登録しました", response["message"])
+        self.assertEqual(response["result"]["isbn13"], "9784297135782")
+        self.assertEqual(response["result"]["page_id"], "page-id")
+        self.assertTrue(response["result"]["created"])
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertEqual(headers["Connection"], "close")
         self.assertEqual(service.calls[0][:2], (b"image bytes", "image/jpeg"))
@@ -176,13 +225,15 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         status, response, headers = self._request(
             service,
             "POST",
-            "/v1/books",
+            "/v2/books",
             body=b"{}",
             headers={"Content-Type": "application/json"},
         )
 
         self.assertEqual(status, HTTPStatus.UNAUTHORIZED)
-        self.assertIn("token", response["error"])
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "unauthorized")
+        self.assertFalse(response["error"]["retryable"])
         self.assertEqual(headers["WWW-Authenticate"], "Bearer")
         self.assertEqual(service.calls, [])
 
@@ -195,7 +246,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                 status, _response, _headers = self._request(
                     service,
                     "POST",
-                    "/v1/books",
+                    "/v2/books",
                     body=b"{}",
                     headers={
                         "Authorization": f"Bearer {token}",
@@ -212,7 +263,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         status, response, _headers = self._request(
             service,
             "POST",
-            "/v1/books",
+            "/v2/books",
             body=json.dumps(
                 {
                     "image": base64.b64encode(b"image").decode("ascii"),
@@ -226,7 +277,8 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         )
 
         self.assertEqual(status, HTTPStatus.INTERNAL_SERVER_ERROR)
-        self.assertNotIn("secret", response["error"])
+        self.assertEqual(response["error"]["code"], "internal_error")
+        self.assertNotIn("secret", response["message"])
 
     def test_post_accepts_a_json_escaped_base64_value_within_image_limit(self) -> None:
         image = b"\xff" * (50 * 1024)
@@ -237,7 +289,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         status, response, _headers = self._request(
             service,
             "POST",
-            "/v1/books",
+            "/v2/books",
             body=body,
             headers={
                 "Authorization": f"Bearer {TEST_TOKEN}",
@@ -247,8 +299,129 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         )
 
         self.assertEqual(status, HTTPStatus.CREATED)
-        self.assertEqual(response["isbn13"], "9784297135782")
+        self.assertTrue(response["ok"])
         self.assertEqual(service.calls[0][0], image)
+
+    def test_post_returns_shortcut_friendly_duplicate_result(self) -> None:
+        status, response, _headers = self._request(
+            FakeRegistrationService(created=False),
+            "POST",
+            "/v2/books",
+            body=json.dumps(
+                {
+                    "image": base64.b64encode(b"image").decode("ascii"),
+                    "mime_type": "image/jpeg",
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["created"])
+        self.assertIn("すでに", response["message"])
+
+    def test_post_returns_stable_error_codes_for_registration_failures(self) -> None:
+        cases = (
+            (
+                IsbnNotDetectedError("detail"),
+                HTTPStatus.UNPROCESSABLE_CONTENT,
+                "isbn_not_detected",
+                False,
+            ),
+            (
+                BookNotFoundError("detail"),
+                HTTPStatus.UNPROCESSABLE_CONTENT,
+                "book_not_found",
+                False,
+            ),
+            (
+                VlmApiError("secret upstream detail"),
+                HTTPStatus.BAD_GATEWAY,
+                "upstream_error",
+                False,
+            ),
+        )
+
+        for error, expected_status, expected_code, expected_retryable in cases:
+            with self.subTest(expected_code=expected_code):
+                status, response, _headers = self._request(
+                    FakeRegistrationService(error=error),
+                    "POST",
+                    "/v2/books",
+                    body=json.dumps(
+                        {
+                            "image": base64.b64encode(b"image").decode("ascii"),
+                            "mime_type": "image/jpeg",
+                        }
+                    ).encode(),
+                    headers={
+                        "Authorization": f"Bearer {TEST_TOKEN}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                self.assertEqual(status, expected_status)
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["error"]["code"], expected_code)
+                self.assertEqual(response["error"]["retryable"], expected_retryable)
+                self.assertNotIn("secret", response["message"])
+                self.assertNotIn("再実行してください", response["message"])
+
+    def test_v1_keeps_bad_request_status_for_unsupported_image_mime_type(self) -> None:
+        status, response, _headers = self._request(
+            FakeRegistrationService(),
+            "POST",
+            "/v1/books",
+            body=json.dumps(
+                {
+                    "image": base64.b64encode(b"image").decode("ascii"),
+                    "mime_type": "application/pdf",
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertIsInstance(response["error"], str)
+
+    def test_v2_rejects_unsupported_methods_with_json_error(self) -> None:
+        for method in ("GET", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"):
+            with self.subTest(method=method):
+                status, response, headers = self._request(
+                    FakeRegistrationService(),
+                    method,
+                    "/v2/books",
+                )
+
+                self.assertEqual(status, HTTPStatus.METHOD_NOT_ALLOWED)
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["error"]["code"], "method_not_allowed")
+                self.assertFalse(response["error"]["retryable"])
+                self.assertEqual(headers["Allow"], "POST")
+
+    def test_method_handling_matches_health_and_unknown_routes(self) -> None:
+        for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS"):
+            with self.subTest(method=method):
+                status, response, headers = self._request(
+                    FakeRegistrationService(), method, "/healthz"
+                )
+
+                self.assertEqual(status, HTTPStatus.METHOD_NOT_ALLOWED)
+                self.assertEqual(response["error"]["code"], "method_not_allowed")
+                self.assertEqual(headers["Allow"], "GET, HEAD")
+
+        status, response, headers = self._request(FakeRegistrationService(), "PUT", "/unknown")
+
+        self.assertEqual(status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(response["error"]["code"], "not_found")
+        self.assertNotIn("Allow", headers)
 
     def test_partial_body_times_out_and_server_remains_available(self) -> None:
         handler = make_handler(
@@ -355,15 +528,23 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         try:
             slow_client.sendall(b"GET /healthz HTTP/1.1\r\n")
             self.assertTrue(request_started.wait(timeout=1))
-            connection = http.client.HTTPConnection(*server.server_address, timeout=1)
-            try:
-                connection.request("GET", "/healthz")
-                self.assertEqual(
-                    connection.getresponse().status,
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                )
-            finally:
-                connection.close()
+            for path in ("/v1/books", "/v2/books"):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=1)
+                try:
+                    connection.request(
+                        "POST",
+                        path,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response = connection.getresponse()
+                    body = json.loads(response.read().decode("utf-8"))
+                    self.assertEqual(response.status, HTTPStatus.SERVICE_UNAVAILABLE)
+                    self.assertEqual(
+                        response.headers["Content-Type"], "application/json; charset=utf-8"
+                    )
+                    self.assertEqual(body, {"error": "Server is busy."})
+                finally:
+                    connection.close()
         finally:
             slow_client.close()
             server.shutdown()
@@ -423,6 +604,38 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(response, {"status": "ok"})
         self.assertEqual(headers["Connection"], "close")
+
+    def test_head_responses_do_not_include_a_body(self) -> None:
+        for path, expected_status in (
+            ("/healthz", HTTPStatus.OK),
+            ("/v1/books", HTTPStatus.METHOD_NOT_ALLOWED),
+            ("/v2/books", HTTPStatus.METHOD_NOT_ALLOWED),
+            ("/unknown", HTTPStatus.NOT_FOUND),
+        ):
+            with self.subTest(path=path):
+                handler = make_handler(
+                    FakeRegistrationService(), api_token=TEST_TOKEN, max_image_bytes=100
+                )
+                handler.log_message = lambda self, format, *args: None
+                server = BookRegistrationHttpServer(("127.0.0.1", 0), handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                client = socket.create_connection(server.server_address, timeout=1)
+                try:
+                    request = f"HEAD {path} HTTP/1.1\r\nHost: {server.server_address[0]}\r\n\r\n"
+                    client.sendall(request.encode("ascii"))
+                    response = b""
+                    while chunk := client.recv(4096):
+                        response += chunk
+
+                    self.assertIn(f" {expected_status.value} ".encode("ascii"), response)
+                    self.assertIn(b"Connection: close", response)
+                    self.assertTrue(response.endswith(b"\r\n\r\n"))
+                finally:
+                    client.close()
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
 
     def _request(self, service, method, path, *, body=None, headers=None, max_image_bytes=100):
         handler = make_handler(service, api_token=TEST_TOKEN, max_image_bytes=max_image_bytes)

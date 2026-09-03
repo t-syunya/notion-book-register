@@ -103,7 +103,8 @@ export BOOK_REGISTER_API_TOKEN="$(python -c 'import secrets; print(secrets.token
 uv run notion-book-register-api
 ```
 
-`POST /v1/books` へ `application/json` を送信します。
+`POST /v1/books` は従来形式の互換endpointです。iPhoneショートカットでは、成功・失敗を
+一貫したJSON形式で受け取れる `POST /v2/books` へ `application/json` を送信します。
 
 ```json
 {
@@ -119,6 +120,41 @@ uv run notion-book-register-api
 `BOOK_REGISTER_MAX_IMAGE_BYTES` から変更できます。外部公開する場合は
 `BOOK_REGISTER_HOST` を明示し、TLS終端を備えたリバースプロキシの背後で実行してください。
 稼働確認には認証不要の `GET /healthz` を利用できます。
+
+ショートカットからは、HTTP statusに加えて `ok` と `message` を確認します。新規登録時は
+次の形式です。重複時はHTTP 200となり、`created` が `false` になります。
+
+```json
+{
+  "ok": true,
+  "message": "書籍をNotionに登録しました。",
+  "result": {
+    "isbn13": "9784297135782",
+    "title": "Python Testing",
+    "page_id": "...",
+    "page_url": "https://www.notion.so/...",
+    "created": true
+  }
+}
+```
+
+失敗時もJSONを返し、`error.code` で分岐できます。`retryable` が `true` の場合だけ、
+時間を置いた再実行の候補にしてください。
+
+```json
+{
+  "ok": false,
+  "message": "画像から有効なISBN-13を読み取れませんでした。",
+  "error": {
+    "code": "isbn_not_detected",
+    "retryable": false
+  }
+}
+```
+
+接続上限でサーバーがrequest lineを解析する前に拒否した場合だけは、versionを特定できないため
+HTTP 503と `{"error":"Server is busy."}` を返します。この場合は `ok` を読まず、HTTP statusを
+優先して短時間の待機後に再実行してください。
 
 サーバー側の読取タイムアウトは `BOOK_REGISTER_REQUEST_TIMEOUT_SECONDS`（既定15秒）、
 同時処理数は `BOOK_REGISTER_MAX_CONCURRENT_REQUESTS`（既定16）で制限します。外部公開時は
