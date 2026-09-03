@@ -169,6 +169,35 @@ HTTP 503と `{"error":"Server is busy."}` を返します。この場合は `ok`
 iPhoneショートカットの具体的な作成・エラー分岐手順は
 [docs/iphone-shortcut.md](docs/iphone-shortcut.md) を参照してください。
 
+## Docker Composeでのセルフホスト
+
+常設サーバーではDocker Composeで実行できます。アプリケーションはステートレスで、本棚データは
+Notionに保存します。コンテナのログは標準出力に出力されるため、`docker compose logs` で確認します。
+
+```bash
+cp .env.example .env
+# .env に GLM_API_KEY、NOTION_API_KEY、NOTION_BOOKSHELF_DATA_SOURCE_ID、
+# BOOK_REGISTER_API_TOKEN を設定する
+docker compose up --build -d
+docker compose ps
+curl http://127.0.0.1:8000/healthz
+```
+
+既定ではホストの `127.0.0.1:8000` のみへ公開します。Tailscale端末から直接接続する場合は、
+`.env` の `BOOK_REGISTER_BIND_ADDRESS` をホストのTailscale IPまたは `0.0.0.0` に変更します。
+その場合はホスト側のファイアウォールもTailscaleインターフェースだけを許可してください。
+Cloudflare Tunnelを使う場合も、コンテナはループバックのままTunnelから接続できます。具体的な
+Tailscale / Cloudflare Tunnelの設定は接続・運用タスクで追加します。
+
+停止と更新は次のとおりです。`.env` はDockerビルドコンテキストへ含まれず、イメージにも保存されません。
+
+```bash
+docker compose down
+docker compose pull  # 将来レジストリイメージを使う場合だけ必要
+docker compose up --build -d
+docker compose logs -f app
+```
+
 ## 実装順
 
 Notion の `Project Issues` の親子関係、優先度、外部依存の少なさから、次の順で進めます。
