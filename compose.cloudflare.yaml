@@ -1,0 +1,10 @@
+services:
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .cloudflare.env
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
