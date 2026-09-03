@@ -20,10 +20,13 @@ from notion_book_register.registration import (
     RegisteredBook,
 )
 from notion_book_register.vlm_client import (
+    GlmVlmClient,
+    GlmVlmConfig,
     OpenAiVlmClient,
     OpenAiVlmConfig,
     VlmApiError,
     VlmProvider,
+    vlm_from_env,
 )
 from notion_book_register.vlm_prompt import (
     IsbnExtractionResult,
@@ -41,6 +44,8 @@ __all__ = [
     "InvalidIsbnError",
     "IsbnExtractionResult",
     "IsbnNotDetectedError",
+    "GlmVlmClient",
+    "GlmVlmConfig",
     "NdlApiError",
     "NdlClient",
     "NdlSruResponse",
@@ -60,4 +65,5 @@ __all__ = [
     "parse_isbn_extraction_response",
     "parse_sru_response",
     "validate_isbn13",
+    "vlm_from_env",
 ]

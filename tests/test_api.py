@@ -22,6 +22,7 @@ from notion_book_register.api import (
     make_handler,
     parse_registration_request,
 )
+from notion_book_register.vlm_client import VlmInputError
 
 TEST_TOKEN = "test-token-0123456789-abcdef-xyz"
 
@@ -370,6 +371,38 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                 self.assertEqual(response["error"]["retryable"], expected_retryable)
                 self.assertNotIn("secret", response["message"])
                 self.assertNotIn("再実行してください", response["message"])
+
+    def test_post_returns_client_error_for_provider_rejected_images(self) -> None:
+        for path, status_code, expected_code in (
+            ("/v1/books", 413, None),
+            ("/v2/books", 415, "unsupported_media_type"),
+        ):
+            with self.subTest(path=path):
+                status, response, _headers = self._request(
+                    FakeRegistrationService(
+                        error=VlmInputError("GLM rejected this image.", status_code=status_code)
+                    ),
+                    "POST",
+                    path,
+                    body=json.dumps(
+                        {
+                            "image": base64.b64encode(b"image").decode("ascii"),
+                            "mime_type": "image/jpeg",
+                        }
+                    ).encode(),
+                    headers={
+                        "Authorization": f"Bearer {TEST_TOKEN}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                self.assertEqual(status, status_code)
+                if expected_code is None:
+                    self.assertEqual(response, {"error": "GLM rejected this image."})
+                else:
+                    self.assertFalse(response["ok"])
+                    self.assertEqual(response["error"]["code"], expected_code)
+                    self.assertFalse(response["error"]["retryable"])
 
     def test_v1_keeps_bad_request_status_for_unsupported_image_mime_type(self) -> None:
         status, response, _headers = self._request(

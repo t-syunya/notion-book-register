@@ -27,7 +27,7 @@ from notion_book_register.registration import (
     IsbnNotDetectedError,
     RegisteredBook,
 )
-from notion_book_register.vlm_client import VlmApiError
+from notion_book_register.vlm_client import VlmApiError, VlmInputError
 
 REGISTER_BOOK_PATH = "/v1/books"
 SHORTCUT_REGISTER_BOOK_PATH = "/v2/books"
@@ -342,6 +342,14 @@ def make_handler(
                     code=error.code,
                     message=str(error),
                     retryable=error.status is HTTPStatus.REQUEST_TIMEOUT,
+                )
+                return
+            except VlmInputError as error:
+                self._write_error(
+                    HTTPStatus(error.status_code),
+                    shortcut_response=shortcut_response,
+                    code=_request_error_code(HTTPStatus(error.status_code)),
+                    message=str(error),
                 )
                 return
             except IsbnNotDetectedError:
