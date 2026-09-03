@@ -28,10 +28,12 @@ from notion_book_register.registration import (
     RegisteredBook,
 )
 from notion_book_register.vlm_client import VlmApiError, VlmInputError
+from notion_book_register.web import BOOK_REGISTRATION_PAGE
 
 REGISTER_BOOK_PATH = "/v1/books"
 SHORTCUT_REGISTER_BOOK_PATH = "/v2/books"
 HEALTH_PATH = "/healthz"
+WEB_UI_PATH = "/"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -280,6 +282,9 @@ def make_handler(
         def do_GET(self) -> None:
             self._cancel_read_deadline()
             path = urlsplit(self.path).path
+            if path == WEB_UI_PATH:
+                self._write_html(HTTPStatus.OK, BOOK_REGISTRATION_PAGE)
+                return
             if path in {REGISTER_BOOK_PATH, SHORTCUT_REGISTER_BOOK_PATH}:
                 self._write_method_not_allowed(path)
                 return
@@ -297,6 +302,9 @@ def make_handler(
         def do_POST(self) -> None:
             self._cancel_read_deadline()
             path = urlsplit(self.path).path
+            if path == WEB_UI_PATH:
+                self._write_method_not_allowed(path)
+                return
             if path == HEALTH_PATH:
                 self._write_method_not_allowed(path)
                 return
@@ -411,7 +419,11 @@ def make_handler(
 
         def do_HEAD(self) -> None:
             self._cancel_read_deadline()
-            if urlsplit(self.path).path == HEALTH_PATH:
+            path = urlsplit(self.path).path
+            if path == WEB_UI_PATH:
+                self._write_html(HTTPStatus.OK, BOOK_REGISTRATION_PAGE, include_body=False)
+                return
+            if path == HEALTH_PATH:
                 body = _json_body({"status": "ok"})
                 self.close_connection = True
                 self.send_response(HTTPStatus.OK.value)
@@ -475,6 +487,17 @@ def make_handler(
 
         def _write_method_not_allowed(self, path: str, *, include_body: bool = True) -> None:
             self._cancel_read_deadline()
+            if path == WEB_UI_PATH:
+                self._write_json(
+                    HTTPStatus.METHOD_NOT_ALLOWED,
+                    _error_payload(
+                        code="method_not_allowed",
+                        message="このページにはGETまたはHEADを使用してください。",
+                    ),
+                    extra_headers={"Allow": "GET, HEAD"},
+                    include_body=include_body,
+                )
+                return
             if path == REGISTER_BOOK_PATH:
                 self._write_json(
                     HTTPStatus.METHOD_NOT_ALLOWED,
@@ -570,6 +593,34 @@ def make_handler(
                 self.send_header("Connection", "close")
                 for name, value in (extra_headers or {}).items():
                     self.send_header(name, value)
+                self.end_headers()
+                if include_body:
+                    self.wfile.write(body)
+            except OSError:
+                return
+
+        def _write_html(
+            self,
+            status: HTTPStatus,
+            page: str,
+            *,
+            include_body: bool = True,
+        ) -> None:
+            body = page.encode("utf-8")
+            try:
+                self.close_connection = True
+                self.send_response(status.value)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                    "connect-src 'self'; base-uri 'none'; form-action 'self'",
+                )
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Connection", "close")
                 self.end_headers()
                 if include_body:
                     self.wfile.write(body)
