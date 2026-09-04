@@ -34,7 +34,7 @@ button:disabled { cursor: wait; opacity: .65; }
     <input id="api-token" type="password" autocomplete="off" required>
   </label>
   <label>書籍画像
-    <input id="image" type="file" accept="image/*" capture="environment" required>
+    <input id="image" type="file" accept="image/jpeg,image/png" capture="environment" required>
   </label>
   <label>ジャンル（任意）
     <input id="genre" type="text" maxlength="200" autocomplete="off" placeholder="例: 技術書">
@@ -74,6 +74,10 @@ button:disabled { cursor: wait; opacity: .65; }
       showStatus("画像を選択してください。", "error");
       return;
     }
+    if (!["image/jpeg", "image/png"].includes(file.type)) {
+      showStatus("GLMではJPEGまたはPNG形式の画像を選択してください。", "error");
+      return;
+    }
     submit.disabled = true;
     showStatus("画像を解析して登録しています…");
     try {
@@ -85,7 +89,7 @@ button:disabled { cursor: wait; opacity: .65; }
         },
         body: JSON.stringify({
           image: await toBase64(file),
-          mime_type: file.type || "image/jpeg",
+          mime_type: file.type,
           genre: genre.value.trim() || undefined,
         }),
       });

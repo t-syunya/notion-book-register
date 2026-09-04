@@ -646,7 +646,8 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertIn("Content-Security-Policy", headers)
         self.assertIn('id="api-token"', body)
-        self.assertIn('capture="environment"', body)
+        self.assertIn('accept="image/jpeg,image/png"', body)
+        self.assertIn("includes(file.type)", body)
         self.assertIn('fetch("/v2/books"', body)
 
     def test_head_root_returns_ui_headers_without_a_body(self) -> None:
