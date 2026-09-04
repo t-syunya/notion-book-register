@@ -645,6 +645,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertIn("Content-Security-Policy", headers)
+        self.assertIn("img-src blob:", headers["Content-Security-Policy"])
         self.assertIn('id="api-token"', body)
         self.assertIn('accept="image/jpeg,image/png"', body)
         self.assertIn("includes(file.type)", body)

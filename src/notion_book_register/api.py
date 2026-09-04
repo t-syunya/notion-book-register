@@ -616,7 +616,7 @@ def make_handler(
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                    "connect-src 'self'; base-uri 'none'; form-action 'self'",
+                    "connect-src 'self'; img-src blob:; base-uri 'none'; form-action 'self'",
                 )
                 self.send_header("Referrer-Policy", "no-referrer")
                 self.send_header("X-Content-Type-Options", "nosniff")
