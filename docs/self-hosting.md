@@ -72,6 +72,14 @@ docker compose -f compose.yaml -f compose.cloudflare.yaml logs -f cloudflared
 ブラウザでは `/` を開き、画像選択またはカメラ撮影で登録します。iPhoneショートカットでは
 `docs/iphone-shortcut.md` の手順に従い、接続先だけを上記URLへ変更します。APIの確認には次を使えます。
 
+Tailscaleを使う場合:
+
+```bash
+curl http://<Tailscaleのホスト名>:8000/healthz
+```
+
+Cloudflare Tunnelを使う場合:
+
 ```bash
 curl https://<ホスト名>/healthz
 ```
