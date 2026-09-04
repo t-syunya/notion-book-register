@@ -648,6 +648,10 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertIn('id="api-token"', body)
         self.assertIn('accept="image/jpeg,image/png"', body)
         self.assertIn("includes(file.type)", body)
+        self.assertIn("file.size >= 5 * 1024 * 1024", body)
+        self.assertIn("imageSize.width > 6000", body)
+        self.assertIn("sessionStorage.getItem", body)
+        self.assertIn("Storage is optional", body)
         self.assertIn('fetch("/v2/books"', body)
 
     def test_head_root_returns_ui_headers_without_a_body(self) -> None:

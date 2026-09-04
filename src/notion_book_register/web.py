@@ -53,8 +53,18 @@ button:disabled { cursor: wait; opacity: .65; }
   const genre = document.getElementById("genre");
   const submit = document.getElementById("submit");
   const status = document.getElementById("status");
-  token.value = sessionStorage.getItem(storageKey) || "";
-  token.addEventListener("input", () => sessionStorage.setItem(storageKey, token.value));
+  try {
+    token.value = sessionStorage.getItem(storageKey) || "";
+  } catch (_) {
+    // Storage can be disabled; the form still works with the current input value.
+  }
+  token.addEventListener("input", () => {
+    try {
+      sessionStorage.setItem(storageKey, token.value);
+    } catch (_) {
+      // Storage is optional and must not prevent form submission.
+    }
+  });
 
   const showStatus = (message, kind = "") => {
     status.textContent = message;
@@ -65,6 +75,19 @@ button:disabled { cursor: wait; opacity: .65; }
     reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
     reader.onload = () => resolve(String(reader.result).split(",", 2)[1]);
     reader.readAsDataURL(file);
+  });
+  const dimensions = (file) => new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("画像を読み込めませんでした。"));
+    };
+    image.src = objectUrl;
   });
 
   form.addEventListener("submit", async (event) => {
@@ -79,8 +102,15 @@ button:disabled { cursor: wait; opacity: .65; }
       return;
     }
     submit.disabled = true;
-    showStatus("画像を解析して登録しています…");
     try {
+      if (file.size >= 5 * 1024 * 1024) {
+        throw new Error("GLMでは5 MiB未満の画像を選択してください。");
+      }
+      const imageSize = await dimensions(file);
+      if (imageSize.width > 6000 || imageSize.height > 6000) {
+        throw new Error("GLMでは縦横6000px以下の画像を選択してください。");
+      }
+      showStatus("画像を解析して登録しています…");
       const response = await fetch("/v2/books", {
         method: "POST",
         headers: {
