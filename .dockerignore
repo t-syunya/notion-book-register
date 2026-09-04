@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+.cloudflare.env
+.cloudflare.env.*
+!.cloudflare.env.example
 .git
 .venv
 __pycache__

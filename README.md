@@ -184,18 +184,23 @@ curl http://127.0.0.1:8000/healthz
 ```
 
 既定ではホストの `127.0.0.1:8000` のみへ公開します。Tailscale端末から直接接続する場合は、
-`.env` の `BOOK_REGISTER_BIND_ADDRESS` をホストのTailscale IPまたは `0.0.0.0` に変更します。
-その場合はホスト側のファイアウォールもTailscaleインターフェースだけを許可してください。
-Cloudflare Tunnelを使う場合も、コンテナはループバックのままTunnelから接続できます。具体的な
-Tailscale / Cloudflare Tunnelの設定は接続・運用タスクで追加します。
+`.env` の `BOOK_REGISTER_BIND_ADDRESS` をホストのTailscale IPへ変更します。Tailnet限定の用途では
+`0.0.0.0` を使用しないでください。Dockerの公開ポートは一般的なホスト向けファイアウォール規則を
+迂回する場合があるためです。
+Cloudflare Tunnelを使う場合も、コンテナはループバックのままTunnelから接続できます。
 
 停止と更新は次のとおりです。`.env` はDockerビルドコンテキストへ含まれず、イメージにも保存されません。
 
 ```bash
 docker compose down
-docker compose pull  # 将来レジストリイメージを使う場合だけ必要
 docker compose up --build -d
 docker compose logs -f app
+```
+
+Cloudflare Tunnelを起動している場合は、停止時も同じComposeファイルを指定します。
+
+```bash
+docker compose -f compose.yaml -f compose.cloudflare.yaml down
 ```
 
 ## ブラウザからの登録
@@ -206,6 +211,9 @@ docker compose logs -f app
 画面で入力したAPIトークンは、このブラウザ
 タブの`sessionStorage`だけに保持され、サーバーには保存しません。ブラウザUIとiPhoneショートカットは
 どちらも同じ `POST /v2/books` を利用します。
+
+Tailscaleを基本経路としたiPhone接続、任意のCloudflare Tunnel公開、運用・更新手順は
+[docs/self-hosting.md](docs/self-hosting.md) を参照してください。
 
 ## 実装順
 
