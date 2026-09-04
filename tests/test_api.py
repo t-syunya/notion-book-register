@@ -638,6 +638,49 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         self.assertEqual(response, {"status": "ok"})
         self.assertEqual(headers["Connection"], "close")
 
+    def test_root_serves_the_browser_registration_ui_without_api_token(self) -> None:
+        status, body, headers = self._raw_request(FakeRegistrationService(), "GET", "/")
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertIn("Content-Security-Policy", headers)
+        self.assertIn("img-src blob:", headers["Content-Security-Policy"])
+        self.assertIn('id="api-token"', body)
+        self.assertIn('accept="image/jpeg,image/png"', body)
+        self.assertIn("includes(file.type)", body)
+        self.assertIn("file.size >= 5 * 1024 * 1024", body)
+        self.assertIn("imageSize.width > 6000", body)
+        self.assertIn("sessionStorage.getItem", body)
+        self.assertIn("Storage is optional", body)
+        self.assertIn('fetch("/v2/books"', body)
+
+    def test_head_root_returns_ui_headers_without_a_body(self) -> None:
+        status, body, headers = self._raw_request(FakeRegistrationService(), "HEAD", "/")
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(body, "")
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+
+    def test_root_rejects_unsupported_methods_with_an_allow_header(self) -> None:
+        for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"):
+            with self.subTest(method=method):
+                status, response, headers = self._request(FakeRegistrationService(), method, "/")
+
+                self.assertEqual(status, HTTPStatus.METHOD_NOT_ALLOWED)
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["error"]["code"], "method_not_allowed")
+                self.assertEqual(headers["Allow"], "GET, HEAD")
+
+    def test_browser_ui_handles_busy_and_non_json_upstream_responses(self) -> None:
+        _status, body, _headers = self._raw_request(FakeRegistrationService(), "GET", "/")
+
+        self.assertIn(
+            'response.status === 503 && result && result.error === "Server is busy."', body
+        )
+        self.assertIn("少し待ってから再実行してください。", body)
+        self.assertIn("サーバーとの通信に失敗しました。", body)
+
     def test_head_responses_do_not_include_a_body(self) -> None:
         for path, expected_status in (
             ("/healthz", HTTPStatus.OK),
@@ -671,6 +714,17 @@ class BookRegistrationEndpointTest(unittest.TestCase):
                     thread.join(timeout=2)
 
     def _request(self, service, method, path, *, body=None, headers=None, max_image_bytes=100):
+        status, response_body, response_headers = self._raw_request(
+            service,
+            method,
+            path,
+            body=body,
+            headers=headers,
+            max_image_bytes=max_image_bytes,
+        )
+        return status, json.loads(response_body), response_headers
+
+    def _raw_request(self, service, method, path, *, body=None, headers=None, max_image_bytes=100):
         handler = make_handler(service, api_token=TEST_TOKEN, max_image_bytes=max_image_bytes)
         handler.log_message = lambda self, format, *args: None
         server = BookRegistrationHttpServer(("127.0.0.1", 0), handler)
@@ -680,8 +734,7 @@ class BookRegistrationEndpointTest(unittest.TestCase):
         try:
             connection.request(method, path, body=body, headers=headers or {})
             response = connection.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
-            return response.status, payload, response.headers
+            return response.status, response.read().decode("utf-8"), response.headers
         finally:
             connection.close()
             server.shutdown()
