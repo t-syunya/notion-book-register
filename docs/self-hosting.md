@@ -57,7 +57,15 @@ docker compose -f compose.yaml -f compose.cloudflare.yaml logs -f cloudflared
 Cloudflare Accessは必須にしません。ただし公開URLは誰でも到達できるため、書き込みには必ず
 `BOOK_REGISTER_API_TOKEN` を使用します。十分に長いランダム値を使い、漏えい時は速やかに再生成してください。
 Tunnelトークンも資格情報です。`.cloudflare.env`、シェル履歴、画面共有、ログへ出さず、漏えい時は
-Cloudflare側でトークンをローテーションします。
+Cloudflare側でトークンをローテーションします。ローテーション後はCloudflareで発行された新しいトークンを
+`.cloudflare.env` の `TUNNEL_TOKEN` に置き換え、次のコマンドでcloudflaredコンテナを再作成します。
+
+```bash
+docker compose -f compose.yaml -f compose.cloudflare.yaml up -d --force-recreate cloudflared
+docker compose -f compose.yaml -f compose.cloudflare.yaml logs -f cloudflared
+```
+
+新しいトークンはコマンドライン引数へ渡さず、`.cloudflare.env` にだけ保存します。
 
 ## 動作確認と更新
 
