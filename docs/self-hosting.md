@@ -23,13 +23,14 @@ curl http://127.0.0.1:8000/healthz
 
 1. 自宅サーバーとiPhoneでTailscaleにログインし、同じTailnetに参加する。
 2. サーバーのTailscale IPまたはMagicDNS名を `tailscale status` で確認する。
-3. `.env` の `BOOK_REGISTER_BIND_ADDRESS` をサーバーのTailscale IP、または `0.0.0.0` に変更する。
+3. `.env` の `BOOK_REGISTER_BIND_ADDRESS` をサーバーのTailscale IPに変更する。
 4. `docker compose up -d` を実行する。
 5. iPhoneのSafariで `http://<Tailscaleのホスト名>:8000/` を開く。ショートカットのURLは
    `http://<Tailscaleのホスト名>:8000/v2/books` にする。
 
-`0.0.0.0` を指定した場合は、ホストのファイアウォールでポート8000をTailscaleインターフェースだけに
-許可してください。より限定したい場合はTailscale IPを指定します。
+Tailnet限定の運用では `0.0.0.0` を指定しません。Dockerの公開ポートは一般的なホスト向け
+ファイアウォール規則を迂回する場合があり、LANや外部インターフェースへ意図せず公開されるためです。
+サーバーのTailscale IPへ直接バインドしてください。
 
 ## Cloudflare Tunnelで公開する
 
@@ -93,3 +94,13 @@ docker compose -f compose.yaml -f compose.cloudflare.yaml up --build -d
 ```
 
 Cloudflare Tunnelを使わない場合は、通常の `docker compose up --build -d` を使用します。
+
+停止時も、起動した構成と同じComposeファイルを指定します。
+
+```bash
+# Tailscaleまたはローカルだけを使う場合
+docker compose down
+
+# Cloudflare Tunnelを使う場合
+docker compose -f compose.yaml -f compose.cloudflare.yaml down
+```
