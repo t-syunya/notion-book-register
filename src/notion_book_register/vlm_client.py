@@ -23,12 +23,24 @@ from notion_book_register.vlm_prompt import (
 
 OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_VLM_MODEL = "gpt-5-mini"
+GLM_CHAT_COMPLETIONS_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+DEFAULT_GLM_VLM_MODEL = "glm-4.6v-flash"
+GLM_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+GLM_MAX_IMAGE_DIMENSION = 6000
 _IMAGE_DETAILS = {"auto", "low", "high"}
 _SUPPORTED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 
 class VlmApiError(RuntimeError):
     """Raised when a VLM provider cannot be queried or parsed."""
+
+
+class VlmInputError(ValueError):
+    """Raised when an image cannot be accepted by the selected VLM provider."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class VlmProvider(Protocol):
@@ -46,6 +58,15 @@ class OpenAiVlmConfig:
     model: str = DEFAULT_OPENAI_VLM_MODEL
     timeout: float = 30.0
     image_detail: str = "auto"
+
+
+@dataclass(frozen=True, slots=True)
+class GlmVlmConfig:
+    """Configuration for Z.AI GLM chat-completions based VLM extraction."""
+
+    api_key: str
+    model: str = DEFAULT_GLM_VLM_MODEL
+    timeout: float = 30.0
 
 
 class _Response(Protocol):
@@ -160,6 +181,105 @@ class OpenAiVlmClient:
             raise VlmApiError(f"Failed to read from OpenAI API: {error}") from error
 
 
+class GlmVlmClient:
+    """Z.AI GLM vision client using its OpenAI-compatible Chat Completions API."""
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        model: str = DEFAULT_GLM_VLM_MODEL,
+        timeout: float = 30.0,
+        opener: _Opener = urlopen,
+    ) -> None:
+        self._config = _validate_glm_config(GlmVlmConfig(api_key, model, timeout))
+        self._opener = opener
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        environ: Mapping[str, str] = os.environ,
+        model: str | None = None,
+        timeout: float = 30.0,
+        opener: _Opener = urlopen,
+    ) -> GlmVlmClient:
+        """Build a client from GLM_API_KEY (or ZAI_API_KEY) and model overrides."""
+
+        api_key = environ.get("GLM_API_KEY") or environ.get("ZAI_API_KEY")
+        if api_key is None:
+            raise ValueError("GLM_API_KEY or ZAI_API_KEY is required.")
+        return cls(
+            api_key,
+            model=(
+                model
+                or environ.get("VLM_MODEL")
+                or environ.get("GLM_VLM_MODEL")
+                or DEFAULT_GLM_VLM_MODEL
+            ),
+            timeout=timeout,
+            opener=opener,
+        )
+
+    def extract_isbn13(self, image: bytes, *, mime_type: str) -> IsbnExtractionResult:
+        """Extract ISBN-13 from one image using the Z.AI GLM API."""
+
+        if not image:
+            raise ValueError("image must not be empty.")
+        normalized_mime_type = _normalize_image_mime_type(mime_type)
+        _validate_glm_image(image, mime_type=normalized_mime_type)
+        request = Request(
+            GLM_CHAT_COMPLETIONS_API_URL,
+            data=json.dumps(
+                _build_glm_request_body(
+                    image, mime_type=normalized_mime_type, model=self._config.model
+                ),
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._config.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "notion-book-register/0.1",
+            },
+            method="POST",
+        )
+        try:
+            with self._opener(request, timeout=self._config.timeout) as response:
+                payload = response.read()
+        except HTTPError as error:
+            try:
+                error_payload = _read_http_error_payload(error)
+            finally:
+                _close_http_error(error)
+            raise VlmApiError(_glm_http_error_message(error.code, error_payload)) from error
+        except URLError as error:
+            raise VlmApiError(f"Failed to connect to GLM API: {error.reason}") from error
+        except TimeoutError as error:
+            raise VlmApiError("Timed out while reading from GLM API.") from error
+        except OSError as error:
+            raise VlmApiError(f"Failed to read from GLM API: {error}") from error
+        except HTTPException as error:
+            raise VlmApiError(f"Failed to read from GLM API: {error}") from error
+
+        try:
+            return parse_isbn_extraction_response(_extract_glm_response_text(payload))
+        except VlmPromptError as error:
+            raise VlmApiError(
+                f"GLM API returned invalid ISBN extraction output: {error}"
+            ) from error
+
+
+def vlm_from_env(*, environ: Mapping[str, str] = os.environ) -> VlmProvider:
+    """Build the selected production VLM provider; GLM is the default."""
+
+    provider = environ.get("VLM_PROVIDER", "glm").strip().casefold()
+    if provider == "glm":
+        return GlmVlmClient.from_env(environ=environ)
+    if provider == "openai":
+        return OpenAiVlmClient.from_env(environ=environ, model=environ.get("VLM_MODEL"))
+    raise ValueError("VLM_PROVIDER must be either 'glm' or 'openai'.")
+
+
 def _validate_config(config: OpenAiVlmConfig) -> OpenAiVlmConfig:
     api_key = config.api_key.strip()
     model = config.model.strip()
@@ -178,6 +298,18 @@ def _validate_config(config: OpenAiVlmConfig) -> OpenAiVlmConfig:
         timeout=config.timeout,
         image_detail=image_detail,
     )
+
+
+def _validate_glm_config(config: GlmVlmConfig) -> GlmVlmConfig:
+    api_key = config.api_key.strip()
+    model = config.model.strip()
+    if not api_key:
+        raise ValueError("GLM API key is required.")
+    if not model:
+        raise ValueError("GLM model is required.")
+    if not math.isfinite(config.timeout) or config.timeout <= 0:
+        raise ValueError("GLM timeout must be a positive finite value.")
+    return GlmVlmConfig(api_key=api_key, model=model, timeout=config.timeout)
 
 
 def _build_openai_response_body(
@@ -224,6 +356,27 @@ def _build_openai_response_body(
     }
 
 
+def _build_glm_request_body(image: bytes, *, mime_type: str, model: str) -> dict[str, Any]:
+    messages = build_isbn_extraction_messages()
+    return {
+        "model": model,
+        "messages": [
+            {"role": messages[0]["role"], "content": messages[0]["content"]},
+            {
+                "role": messages[-1]["role"],
+                "content": [
+                    {"type": "text", "text": messages[-1]["content"]},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _image_data_url(image, mime_type=mime_type)},
+                    },
+                ],
+            },
+        ],
+        "thinking": {"type": "disabled"},
+    }
+
+
 def _image_data_url(image: bytes, *, mime_type: str) -> str:
     encoded_image = base64.b64encode(image).decode("ascii")
     return f"data:{mime_type};base64,{encoded_image}"
@@ -237,6 +390,73 @@ def _normalize_image_mime_type(value: str) -> str:
         supported = ", ".join(sorted(_SUPPORTED_IMAGE_MIME_TYPES))
         raise ValueError(f"mime_type must be one of: {supported}.")
     return mime_type
+
+
+def _validate_glm_image(image: bytes, *, mime_type: str) -> None:
+    if mime_type not in {"image/jpeg", "image/png"}:
+        raise VlmInputError("GLM supports only image/jpeg and image/png.", status_code=415)
+    if len(image) >= GLM_MAX_IMAGE_BYTES:
+        raise VlmInputError("GLM images must be smaller than 5 MiB.", status_code=413)
+    dimensions = _image_dimensions(image, mime_type=mime_type)
+    if dimensions is None:
+        return
+    if max(dimensions) > GLM_MAX_IMAGE_DIMENSION:
+        raise VlmInputError(
+            "GLM images must not exceed 6000 pixels on either side.", status_code=413
+        )
+
+
+def _image_dimensions(image: bytes, *, mime_type: str) -> tuple[int, int] | None:
+    if mime_type == "image/png" and len(image) >= 24 and image.startswith(b"\x89PNG\r\n\x1a\n"):
+        return int.from_bytes(image[16:20], "big"), int.from_bytes(image[20:24], "big")
+    if mime_type == "image/jpeg":
+        return _jpeg_dimensions(image)
+    return None
+
+
+def _jpeg_dimensions(image: bytes) -> tuple[int, int] | None:
+    """Return JPEG dimensions from a Start Of Frame marker when present."""
+
+    if len(image) < 4 or not image.startswith(b"\xff\xd8"):
+        return None
+    offset = 2
+    while offset + 9 <= len(image):
+        if image[offset] != 0xFF:
+            return None
+        while offset < len(image) and image[offset] == 0xFF:
+            offset += 1
+        if offset >= len(image):
+            return None
+        marker = image[offset]
+        offset += 1
+        if marker in {0x01, 0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+            continue
+        if offset + 2 > len(image):
+            return None
+        segment_length = int.from_bytes(image[offset : offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(image):
+            return None
+        if marker in {
+            0xC0,
+            0xC1,
+            0xC2,
+            0xC3,
+            0xC5,
+            0xC6,
+            0xC7,
+            0xC9,
+            0xCA,
+            0xCB,
+            0xCD,
+            0xCE,
+            0xCF,
+        }:
+            return (
+                int.from_bytes(image[offset + 5 : offset + 7], "big"),
+                int.from_bytes(image[offset + 3 : offset + 5], "big"),
+            )
+        offset += segment_length
+    return None
 
 
 def _extract_response_text(payload: bytes) -> str:
@@ -260,6 +480,22 @@ def _extract_response_text(payload: bytes) -> str:
                 return text
 
     raise VlmApiError("OpenAI API response is missing output text.")
+
+
+def _extract_glm_response_text(payload: bytes) -> str:
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise VlmApiError("GLM API returned invalid JSON.") from error
+    if not isinstance(data, dict):
+        raise VlmApiError("GLM API response must be a JSON object.")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise VlmApiError("GLM API response is missing choices.")
+    message = choices[0].get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise VlmApiError("GLM API response is missing message content.")
+    return message["content"]
 
 
 def _raise_for_response_error(data: dict[str, Any]) -> None:
@@ -333,3 +569,10 @@ def _openai_error_detail(payload: bytes) -> str | None:
         if isinstance(message, str) and message.strip():
             return message.strip()
     return None
+
+
+def _glm_http_error_message(status_code: int, payload: bytes) -> str:
+    detail = _openai_error_detail(payload)
+    if detail is None:
+        return f"GLM API returned HTTP {status_code}."
+    return f"GLM API returned HTTP {status_code}: {detail}"

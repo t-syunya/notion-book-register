@@ -9,7 +9,7 @@ from typing import Protocol
 from notion_book_register.models import Book
 from notion_book_register.ndl_client import NdlClient, NdlSruResponse, book_from_sru_response
 from notion_book_register.notion_client import CreatedNotionPage, NotionClient
-from notion_book_register.vlm_client import OpenAiVlmClient, VlmProvider
+from notion_book_register.vlm_client import VlmProvider, vlm_from_env
 
 
 class BookRegistrationError(RuntimeError):
@@ -75,7 +75,7 @@ class BookRegistrationService:
         """Build the production service from environment configuration."""
 
         return cls(
-            OpenAiVlmClient.from_env(),
+            vlm_from_env(),
             NdlClient(),
             NotionClient.from_env(),
         )

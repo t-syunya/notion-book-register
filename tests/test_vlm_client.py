@@ -5,11 +5,13 @@ from http.client import HTTPException, IncompleteRead
 from urllib.error import HTTPError, URLError
 
 from notion_book_register import (
+    GlmVlmClient,
     IsbnExtractionResult,
     OpenAiVlmClient,
     VlmApiError,
     VlmProvider,
 )
+from notion_book_register.vlm_client import VlmInputError, vlm_from_env
 
 
 class FakeResponse:
@@ -50,6 +52,121 @@ class CloseTrackingBody:
 
     def close(self) -> None:
         self.closed = True
+
+
+class GlmVlmClientTest(unittest.TestCase):
+    def test_extract_isbn13_builds_glm_vision_request(self) -> None:
+        requests = []
+
+        def opener(request, timeout):
+            requests.append((request, timeout))
+            return FakeResponse(
+                json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "isbn13": "9784297135782",
+                                            "candidates": ["9784297135782"],
+                                            "confidence": "high",
+                                            "evidence": "barcode",
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+            )
+
+        result = GlmVlmClient(
+            " token ", model=" glm-4.6v-flash ", timeout=3, opener=opener
+        ).extract_isbn13(b"image bytes", mime_type="image/jpeg")
+
+        request, timeout = requests[0]
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(result.isbn13, "9784297135782")
+        self.assertEqual(timeout, 3)
+        self.assertEqual(request.full_url, "https://api.z.ai/api/paas/v4/chat/completions")
+        self.assertEqual(request.headers["Authorization"], "Bearer token")
+        self.assertEqual(body["model"], "glm-4.6v-flash")
+        self.assertEqual(
+            body["messages"][1]["content"][1]["image_url"]["url"],
+            "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM=",
+        )
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+
+    def test_vlm_from_env_defaults_to_glm_and_allows_openai(self) -> None:
+        self.assertIsInstance(vlm_from_env(environ={"GLM_API_KEY": "token"}), GlmVlmClient)
+        self.assertIsInstance(
+            vlm_from_env(environ={"VLM_PROVIDER": "openai", "OPENAI_API_KEY": "token"}),
+            OpenAiVlmClient,
+        )
+        with self.assertRaisesRegex(ValueError, "VLM_PROVIDER"):
+            vlm_from_env(environ={"VLM_PROVIDER": "other"})
+
+    def test_vlm_from_env_uses_provider_specific_models_without_a_common_override(self) -> None:
+        glm = vlm_from_env(environ={"GLM_API_KEY": "token", "GLM_VLM_MODEL": "glm-custom"})
+        openai = vlm_from_env(
+            environ={
+                "VLM_PROVIDER": "openai",
+                "OPENAI_API_KEY": "token",
+                "OPENAI_VLM_MODEL": "openai-custom",
+            }
+        )
+
+        self.assertEqual(glm._config.model, "glm-custom")
+        self.assertEqual(openai._config.model, "openai-custom")
+
+    def test_common_vlm_model_override_takes_precedence_for_both_providers(self) -> None:
+        glm = vlm_from_env(environ={"GLM_API_KEY": "token", "VLM_MODEL": "common-model"})
+        openai = vlm_from_env(
+            environ={
+                "VLM_PROVIDER": "openai",
+                "OPENAI_API_KEY": "token",
+                "VLM_MODEL": "common-model",
+                "OPENAI_VLM_MODEL": "openai-model",
+            }
+        )
+
+        self.assertEqual(glm._config.model, "common-model")
+        self.assertEqual(openai._config.model, "common-model")
+
+    def test_glm_rejects_unsupported_or_oversized_images_before_request(self) -> None:
+        client = GlmVlmClient("token", opener=lambda request, timeout: self.fail("must not call"))
+        with self.assertRaisesRegex(VlmInputError, "image/jpeg") as unsupported:
+            client.extract_isbn13(b"image", mime_type="image/webp")
+        self.assertEqual(unsupported.exception.status_code, 415)
+        with self.assertRaisesRegex(VlmInputError, "5 MiB") as oversized:
+            client.extract_isbn13(b"x" * (5 * 1024 * 1024), mime_type="image/jpeg")
+        self.assertEqual(oversized.exception.status_code, 413)
+
+    def test_glm_rejects_png_larger_than_dimension_limit(self) -> None:
+        image = (
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (6001).to_bytes(4, "big") + (1).to_bytes(4, "big")
+        )
+        client = GlmVlmClient("token", opener=lambda request, timeout: self.fail("must not call"))
+
+        with self.assertRaisesRegex(VlmInputError, "6000 pixels") as error:
+            client.extract_isbn13(image, mime_type="image/png")
+
+        self.assertEqual(error.exception.status_code, 413)
+
+    def test_glm_rejects_jpeg_larger_than_dimension_limit(self) -> None:
+        image = (
+            b"\xff\xd8\xff\xc0\x00\x08\x08"
+            + (6001).to_bytes(2, "big")
+            + (1).to_bytes(2, "big")
+            + b"\x01"
+        )
+        client = GlmVlmClient("token", opener=lambda request, timeout: self.fail("must not call"))
+
+        with self.assertRaisesRegex(VlmInputError, "6000 pixels") as error:
+            client.extract_isbn13(image, mime_type="image/jpeg")
+
+        self.assertEqual(error.exception.status_code, 413)
 
 
 class OpenAiVlmClientTest(unittest.TestCase):

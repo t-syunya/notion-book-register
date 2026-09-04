@@ -23,14 +23,18 @@ uv run ruff check .
 
 ## VLM ISBN 抽出
 
-`OPENAI_API_KEY` に OpenAI API キーを設定すると、`OpenAiVlmClient` から画像中の
-ISBN-13 を抽出できます。モデルは `OPENAI_VLM_MODEL` で上書きでき、既定値は
-`gpt-5-mini` です。
+既定のVLMはZ.AIの `GLM-4.6V-Flash` です。`GLM_API_KEY`（または `ZAI_API_KEY`）を設定すると、
+画像からISBN-13を抽出できます。モデルは `GLM_VLM_MODEL` で上書きできます。
+GLM利用時はJPEGまたはPNG、5 MiB未満、縦横6000px以下の画像を使用してください。
+
+`VLM_PROVIDER=openai` を設定するとOpenAIへ切り替えられます。その場合は `OPENAI_API_KEY` が必要で、
+モデルは `OPENAI_VLM_MODEL` で指定します。両プロバイダー共通で上書きしたい場合だけ
+`VLM_MODEL` を使用します。
 
 ```python
-from notion_book_register import OpenAiVlmClient
+from notion_book_register import GlmVlmClient
 
-client = OpenAiVlmClient.from_env()
+client = GlmVlmClient.from_env()
 with open("book-cover.jpg", "rb") as image_file:
     result = client.extract_isbn13(image_file.read(), mime_type="image/jpeg")
 print(result.isbn13)
@@ -96,7 +100,7 @@ response = client.search_by_isbn_with_fallback(
 APIは既定で `127.0.0.1:8000` を使用し、Bearer token認証を必須とします。
 
 ```bash
-export OPENAI_API_KEY="..."
+export GLM_API_KEY="..."
 export NOTION_API_KEY="..."
 export NOTION_BOOKSHELF_DATA_SOURCE_ID="..."
 export BOOK_REGISTER_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
