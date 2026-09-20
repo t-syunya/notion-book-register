@@ -23,7 +23,7 @@ from notion_book_register.vlm_prompt import (
 
 OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_VLM_MODEL = "gpt-5-mini"
-GLM_CHAT_COMPLETIONS_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+GLM_CHAT_COMPLETIONS_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 DEFAULT_GLM_VLM_MODEL = "glm-4.6v-flash"
 GLM_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 GLM_MAX_IMAGE_DIMENSION = 6000
@@ -358,7 +358,7 @@ def _build_openai_response_body(
 
 def _build_glm_request_body(image: bytes, *, mime_type: str, model: str) -> dict[str, Any]:
     messages = build_isbn_extraction_messages()
-    return {
+    body: dict[str, Any] = {
         "model": model,
         "messages": [
             {"role": messages[0]["role"], "content": messages[0]["content"]},
@@ -375,6 +375,10 @@ def _build_glm_request_body(image: bytes, *, mime_type: str, model: str) -> dict
         ],
         "thinking": {"type": "disabled"},
     }
+    if model.strip().casefold().startswith("glm-5.3"):
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = "low"
+    return body
 
 
 def _image_data_url(image: bytes, *, mime_type: str) -> str:
