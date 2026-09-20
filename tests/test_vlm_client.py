@@ -89,7 +89,7 @@ class GlmVlmClientTest(unittest.TestCase):
         body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(result.isbn13, "9784297135782")
         self.assertEqual(timeout, 3)
-        self.assertEqual(request.full_url, "https://api.z.ai/api/paas/v4/chat/completions")
+        self.assertEqual(request.full_url, "https://api.z.ai/api/coding/paas/v4/chat/completions")
         self.assertEqual(request.headers["Authorization"], "Bearer token")
         self.assertEqual(body["model"], "glm-4.6v-flash")
         self.assertEqual(
@@ -97,6 +97,40 @@ class GlmVlmClientTest(unittest.TestCase):
             "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM=",
         )
         self.assertEqual(body["thinking"], {"type": "disabled"})
+
+    def test_extract_isbn13_enables_low_effort_thinking_for_glm_5_3(self) -> None:
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "isbn13": None,
+                                            "candidates": [],
+                                            "confidence": "low",
+                                            "evidence": "",
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+            )
+
+        GlmVlmClient("token", model="glm-5.3-flash", opener=opener).extract_isbn13(
+            b"image bytes", mime_type="image/jpeg"
+        )
+
+        body = json.loads(requests[0].data.decode("utf-8"))
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertEqual(body["reasoning_effort"], "low")
 
     def test_vlm_from_env_defaults_to_glm_and_allows_openai(self) -> None:
         self.assertIsInstance(vlm_from_env(environ={"GLM_API_KEY": "token"}), GlmVlmClient)
