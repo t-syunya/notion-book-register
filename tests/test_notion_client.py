@@ -132,6 +132,10 @@ class NotionClientTest(unittest.TestCase):
             {"title": [{"type": "text", "text": {"content": "Python Testing"}}]},
         )
         self.assertEqual(body["properties"]["状態"], {"select": {"name": "未読"}})
+        self.assertEqual(
+            body["properties"]["著者"],
+            {"rich_text": [{"type": "text", "text": {"content": "Author A"}}]},
+        )
         self.assertEqual(body["properties"]["ジャンル"], {"select": {"name": "技術書"}})
         self.assertIn(
             "ISBN: 9784297135782",
