@@ -21,6 +21,8 @@ def book_to_notion_properties(
         "状態": status,
         "memo": _build_memo(book),
     }
+    if book.authors:
+        properties["著者"] = ", ".join(book.authors)
     if genre:
         properties["ジャンル"] = genre
     return properties

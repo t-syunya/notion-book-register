@@ -18,6 +18,7 @@ class NotionMappingTest(unittest.TestCase):
 
         self.assertEqual(properties["作品名"], "Python Testing")
         self.assertEqual(properties["状態"], "未読")
+        self.assertEqual(properties["著者"], "Author A, Author B")
         self.assertEqual(properties["ジャンル"], "技術書")
         self.assertIn("ISBN: 9784297135782", properties["memo"])
         self.assertIn("著者: Author A, Author B", properties["memo"])

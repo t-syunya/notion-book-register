@@ -195,6 +195,8 @@ def _book_page_properties(
         "状態": _select_property(mapped["状態"]),
         "memo": _rich_text_property(mapped["memo"]),
     }
+    if "著者" in mapped:
+        properties["著者"] = _rich_text_property(mapped["著者"])
     if "ジャンル" in mapped:
         properties["ジャンル"] = _select_property(mapped["ジャンル"])
     return properties
