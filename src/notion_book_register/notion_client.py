@@ -74,6 +74,11 @@ class NotionClient:
         self._timeout = timeout
         self._opener = opener
 
+    @property
+    def data_source_id(self) -> str:
+        """Configured destination, included in pre-write confirmation."""
+        return self._data_source_id
+
     @classmethod
     def from_env(
         cls,

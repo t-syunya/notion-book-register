@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from secrets import token_urlsafe
 from threading import Lock
+from time import monotonic
 from typing import Protocol
 
 from notion_book_register.models import Book
@@ -18,6 +20,10 @@ class BookRegistrationError(RuntimeError):
 
 class IsbnNotDetectedError(BookRegistrationError):
     """Raised when no validated ISBN-13 can be read from the image."""
+
+
+class InvalidPreviewError(BookRegistrationError):
+    """Preview is expired, consumed, or does not contain the chosen ISBN."""
 
 
 class BookNotFoundError(BookRegistrationError):
@@ -46,6 +52,9 @@ class _NdlBookProvider(Protocol):
 
 
 class _NotionBookStore(Protocol):
+    @property
+    def data_source_id(self) -> str: ...
+
     def create_book_page(
         self,
         book: Book,
@@ -69,6 +78,7 @@ class BookRegistrationService:
         self._ndl = ndl
         self._notion = notion
         self._notion_write_lock = Lock()
+        self._previews: dict[str, tuple[float, tuple[Book, ...], str | None]] = {}
 
     @classmethod
     def from_env(cls) -> BookRegistrationService:
@@ -79,6 +89,68 @@ class BookRegistrationService:
             NdlClient(),
             NotionClient.from_env(),
         )
+
+    def preview_image(
+        self,
+        image: bytes,
+        *,
+        mime_type: str,
+        title: str | None = None,
+        author: str | None = None,
+        genre: str | None = None,
+    ) -> dict:
+        """Recognize candidates without writing; keep immutable books for five minutes."""
+        if title is not None or author is not None:
+            raise ValueError("Preview requires exact ISBN lookup, without fallback.")
+        extraction = self._vlm.extract_isbn13(image, mime_type=mime_type)
+        isbns = tuple(
+            dict.fromkeys(
+                ((extraction.isbn13,) if extraction.isbn13 else ()) + extraction.candidates
+            )
+        )
+        if not isbns:
+            raise IsbnNotDetectedError("No valid ISBN-13 was detected in the image.")
+        if len(isbns) > 5:
+            raise IsbnNotDetectedError("Too many ISBN candidates; use a clearer image.")
+        books = tuple(
+            book
+            for isbn in isbns
+            if (book := book_from_sru_response(self._ndl.search_by_isbn(isbn), isbn13=isbn))
+            is not None
+            and book.isbn13 == isbn
+        )
+        if not books:
+            raise BookNotFoundError("No matching bibliographic record was found in NDL Search.")
+        token = token_urlsafe(32)
+        with self._notion_write_lock:
+            now = monotonic()
+            self._previews = {k: v for k, v in self._previews.items() if v[0] > now}
+            if len(self._previews) >= 128:
+                raise InvalidPreviewError("Too many pending previews.")
+            self._previews[token] = (now + 300, books, _normalize_optional_text(genre))
+        return {
+            "preview_token": token,
+            "expires_in": 300,
+            "data_source_id": self._notion.data_source_id,
+            "confidence": extraction.confidence,
+            "candidates": [
+                {"isbn13": b.isbn13, "title": b.title, "authors": list(b.authors)} for b in books
+            ],
+        }
+
+    def commit_preview(self, token: str, isbn13: str) -> RegisteredBook:
+        """Consume before writing, including on ambiguous upstream failures."""
+        with self._notion_write_lock:
+            preview = self._previews.get(token)
+            if preview is None or preview[0] <= monotonic():
+                self._previews.pop(token, None)
+                raise InvalidPreviewError("Preview is expired or already consumed.")
+            book = next((b for b in preview[1] if b.isbn13 == isbn13), None)
+            if book is None:
+                raise InvalidPreviewError("ISBN is not in this preview.")
+            del self._previews[token]
+            page = self._notion.create_book_page(book, genre=preview[2])
+            return RegisteredBook(book=book, page=page)
 
     def register_image(
         self,

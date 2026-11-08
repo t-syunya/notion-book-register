@@ -218,3 +218,14 @@ Tailscaleを基本経路としたiPhone接続、任意のCloudflare Tunnel公開
 
 開発時の実装順と Issue / PR 運用は [docs/development-workflow.md](docs/development-workflow.md) を
 参照してください。
+
+## JUIZ向けの保存前確認 API
+
+従来の `/v1/books`・`/v2/books` は一括登録のままです。JUIZからは同じBearer認証で次の2段階を使います。
+
+1. `POST /v2/books/preview` に `image`（base64）と `mime_type`、任意の `genre` を送信する。Notionには書き込まず、`result` に `preview_token`、`expires_in: 300`、`data_source_id`、`confidence`、`candidates: [{isbn13,title,authors}]` を返す。ISBN候補は最大5件、NDLで完全ISBN検索できる候補だけ。title/authorフォールバックは使用しない。
+2. 保存先と画像・候補を本人に示し、選択・承認後に `POST /v2/books/commit` へ `{"preview_token":"...","isbn13":"..."}` を送る。確認時の書誌・ジャンルを変更せず、既存ISBN重複判定を使って登録する。成功形式は `/v2/books` と同じ。
+
+トークンはメモリ内で5分・最大128件。再起動で失効する。ISBNが候補外なら409、期限切れ・使用済みも409。登録前に消費するため、通信失敗時も再送しない。保存結果が不明なら本棚をISBNで確認し、未確認のまま新しい登録を実行しない。トークンや画像をログへ残さない。複数プロセスでの共有や永続的な冪等性は提供しないため、単一APIプロセスで使用する。Notion側の外部同時登録との原子的な重複排除は既存同様に保証しない。
+
+GLM系VLMの資格情報はこのサービスだけに設定する。新しいAPIの実サービスへの配置・接続確認は別途必要。
