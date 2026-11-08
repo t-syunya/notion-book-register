@@ -24,6 +24,7 @@ from notion_book_register.notion_client import NotionApiError
 from notion_book_register.registration import (
     BookNotFoundError,
     BookRegistrationService,
+    InvalidPreviewError,
     IsbnNotDetectedError,
     RegisteredBook,
 )
@@ -32,6 +33,8 @@ from notion_book_register.web import BOOK_REGISTRATION_PAGE
 
 REGISTER_BOOK_PATH = "/v1/books"
 SHORTCUT_REGISTER_BOOK_PATH = "/v2/books"
+PREVIEW_BOOK_PATH = "/v2/books/preview"
+COMMIT_BOOK_PATH = "/v2/books/commit"
 HEALTH_PATH = "/healthz"
 WEB_UI_PATH = "/"
 DEFAULT_HOST = "127.0.0.1"
@@ -285,7 +288,12 @@ def make_handler(
             if path == WEB_UI_PATH:
                 self._write_html(HTTPStatus.OK, BOOK_REGISTRATION_PAGE)
                 return
-            if path in {REGISTER_BOOK_PATH, SHORTCUT_REGISTER_BOOK_PATH}:
+            if path in {
+                REGISTER_BOOK_PATH,
+                SHORTCUT_REGISTER_BOOK_PATH,
+                PREVIEW_BOOK_PATH,
+                COMMIT_BOOK_PATH,
+            }:
                 self._write_method_not_allowed(path)
                 return
             if path != HEALTH_PATH:
@@ -308,7 +316,12 @@ def make_handler(
             if path == HEALTH_PATH:
                 self._write_method_not_allowed(path)
                 return
-            if path not in {REGISTER_BOOK_PATH, SHORTCUT_REGISTER_BOOK_PATH}:
+            if path not in {
+                REGISTER_BOOK_PATH,
+                SHORTCUT_REGISTER_BOOK_PATH,
+                PREVIEW_BOOK_PATH,
+                COMMIT_BOOK_PATH,
+            }:
                 self._write_json(
                     HTTPStatus.NOT_FOUND,
                     _error_payload(
@@ -317,7 +330,7 @@ def make_handler(
                     ),
                 )
                 return
-            shortcut_response = path == SHORTCUT_REGISTER_BOOK_PATH
+            shortcut_response = path != REGISTER_BOOK_PATH
             if not self._is_authorized(api_token):
                 self._write_error(
                     HTTPStatus.UNAUTHORIZED,
@@ -335,14 +348,50 @@ def make_handler(
                     payload = self._read_json_body(max_request_bytes=max_request_bytes)
                 finally:
                     self._cancel_read_deadline()
-                request = parse_registration_request(payload, max_image_bytes=max_image_bytes)
-                result = service.register_image(
-                    request.image,
-                    mime_type=request.mime_type,
-                    title=request.title,
-                    author=request.author,
-                    genre=request.genre,
+                if path == COMMIT_BOOK_PATH:
+                    try:
+                        data = json.loads(payload)
+                    except (ValueError, UnicodeDecodeError) as error:
+                        raise ApiRequestError(HTTPStatus.BAD_REQUEST, "Invalid JSON.") from error
+                    if (
+                        not isinstance(data, dict)
+                        or set(data) != {"preview_token", "isbn13"}
+                        or not isinstance(data["preview_token"], str)
+                        or not re.fullmatch(r"[A-Za-z0-9_-]{43}", data["preview_token"])
+                        or not isinstance(data["isbn13"], str)
+                        or not re.fullmatch(r"97[89][0-9]{10}", data["isbn13"])
+                    ):
+                        raise ApiRequestError(HTTPStatus.BAD_REQUEST, "Invalid preview selection.")
+                    result = service.commit_preview(data["preview_token"], data["isbn13"])
+                else:
+                    request = parse_registration_request(payload, max_image_bytes=max_image_bytes)
+                    if path == PREVIEW_BOOK_PATH:
+                        if request.title is not None or request.author is not None:
+                            raise ApiRequestError(
+                                HTTPStatus.BAD_REQUEST, "Preview requires exact ISBN lookup."
+                            )
+                        preview = service.preview_image(
+                            request.image,
+                            mime_type=request.mime_type,
+                            genre=request.genre,
+                        )
+                        self._write_json(HTTPStatus.OK, {"ok": True, "result": preview})
+                        return
+                    result = service.register_image(
+                        request.image,
+                        mime_type=request.mime_type,
+                        title=request.title,
+                        author=request.author,
+                        genre=request.genre,
+                    )
+            except InvalidPreviewError:
+                self._write_error(
+                    HTTPStatus.CONFLICT,
+                    shortcut_response=True,
+                    code="invalid_preview",
+                    message="確認が期限切れ・使用済みか、候補が一致しません。再認識してください。",
                 )
+                return
             except ApiRequestError as error:
                 self._write_error(
                     error.status if shortcut_response else error.legacy_status or error.status,
@@ -506,7 +555,7 @@ def make_handler(
                     include_body=include_body,
                 )
                 return
-            if path == SHORTCUT_REGISTER_BOOK_PATH:
+            if path in {SHORTCUT_REGISTER_BOOK_PATH, PREVIEW_BOOK_PATH, COMMIT_BOOK_PATH}:
                 self._write_json(
                     HTTPStatus.METHOD_NOT_ALLOWED,
                     _error_payload(
